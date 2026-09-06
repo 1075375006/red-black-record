@@ -1,0 +1,10 @@
+{
+  "name": "red-black-record",
+  "version": "1.0.0",
+  "private": true,
+  "description": "红黑记录：足球比赛预测与赛果追踪",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
