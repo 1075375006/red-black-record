@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11100f">
+  <title>红黑记录 · 足球预测账本</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="红黑记录首页">
+        <span class="brand-mark"><i></i><i></i></span>
+        <span><strong>红黑记录</strong><small>FOOTBALL PREDICTION LOG</small></span>
+      </a>
+      <div class="topbar-meta"><span class="live-dot"></span><span id="clockLabel">数据随时更新</span></div>
+    </header>
+    <main>
+      <section class="intro-grid">
+        <div class="intro-copy">
+          <p class="eyebrow">DAILY MATCH LEDGER <span></span></p>
+          <h1>今天押哪边，<em>赛后见红黑。</em></h1>
+          <p class="intro-text">每天同步竞彩比赛，留下你的方向和判断。赛果回来后，系统按记录时的盘口自动结算。</p>
+        </div>
+        <div class="date-panel">
+          <label for="dateInput">查看日期</label>
+          <div class="date-row">
+            <button class="icon-button" id="prevDay" title="前一天" aria-label="前一天">←</button>
+            <input id="dateInput" type="date">
+            <button class="icon-button" id="nextDay" title="后一天" aria-label="后一天">→</button>
+          </div>
+          <div class="date-subline"><span id="dateText">—</span><span class="status-pill" id="syncStatus">准备同步</span></div>
+        </div>
+      </section>
+      <section class="stats-row" aria-label="当日统计">
+        <article class="stat-card stat-total"><span class="stat-label">今日场次</span><strong id="totalCount">—</strong><small>已同步比赛</small></article>
+        <article class="stat-card"><span class="stat-label">已记录</span><strong id="pickedCount">—</strong><small>留下预测方向</small></article>
+        <article class="stat-card stat-red"><span class="stat-label">红</span><strong id="redCount">—</strong><small>预测命中</small></article>
+        <article class="stat-card stat-black"><span class="stat-label">黑</span><strong id="blackCount">—</strong><small>预测未中</small></article>
+        <article class="stat-card stat-rate"><span class="stat-label">命中率</span><strong id="hitRate">—</strong><small>已结算场次</small></article>
+      </section>
+      <section class="toolbar">
+        <div class="filter-tabs" role="tablist" aria-label="比赛筛选">
+          <button class="filter-tab active" data-filter="all">全部 <b id="allBadge">0</b></button>
+          <button class="filter-tab" data-filter="unpicked">待预测 <b id="unpickedBadge">0</b></button>
+          <button class="filter-tab" data-filter="pending">待开奖 <b id="pendingBadge">0</b></button>
+          <button class="filter-tab" data-filter="red">红 <b id="redBadge">0</b></button>
+          <button class="filter-tab" data-filter="black">黑 <b id="blackBadge">0</b></button>
+        </div>
+        <div class="toolbar-actions"><span class="last-sync" id="lastSync">尚未同步</span><button class="text-button" id="clearDay">清空当天记录</button><button class="primary-button" id="refreshButton"><span class="refresh-icon">↻</span> 同步数据</button></div>
+      </section>
+      <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="matchesList" class="matches-list" aria-live="polite"></section>
+      <section id="emptyState" class="empty-state" hidden><div class="empty-mark">∅</div><h2>这一天还没有比赛</h2><p>可以换个日期，或点击右上角重新同步。</p></section>
+      <footer class="page-footer"><div><span class="footer-dot"></span> 数据源：竞彩官方接口</div><div>预测仅作个人记录 · 红黑由最终赛果自动判定</div></footer>
+    </main>
+  </div>
+  <template id="matchTemplate">
+    <article class="match-card">
+      <div class="match-head"><div class="match-ident"><span class="match-number"></span><span class="league-name"></span><span class="match-time"></span></div><span class="match-status"></span></div>
+      <div class="teams-row">
+        <div class="team team-home"><span class="team-rank"></span><strong class="home-name"></strong><small>主队</small></div>
+        <div class="vs-block"><span class="vs-label">VS</span><span class="score-label"></span></div>
+        <div class="team team-away"><span class="team-rank"></span><strong class="away-name"></strong><small>客队</small></div>
+      </div>
+      <div class="odds-strip"><span class="odds-caption"></span><span class="odds-item"><i>胜</i><b class="odd-h"></b></span><span class="odds-item"><i>平</i><b class="odd-d"></b></span><span class="odds-item"><i>负</i><b class="odd-a"></b></span><span class="line-chip"></span></div>
+      <div class="prediction-area">
+        <div class="prediction-title"><span>我的预测</span><small class="saved-label"></small></div>
+        <div class="market-switch" role="group" aria-label="玩法"><button data-market="had">胜平负</button><button data-market="hhad">让球</button></div>
+        <div class="pick-buttons" role="group" aria-label="预测方向"><button data-pick="H"><span class="pick-main"></span><small>主队方向</small></button><button data-pick="D"><span class="pick-main"></span><small>比分相同</small></button><button data-pick="A"><span class="pick-main"></span><small>客队方向</small></button></div>
+        <div class="note-row"><span class="note-icon">✎</span><input class="note-input" type="text" maxlength="160" placeholder="写下你的判断依据（可选）"><button class="save-button">保存记录</button></div>
+      </div>
+      <div class="settlement-row"><div class="settlement-copy"><span class="settlement-icon"></span><span class="settlement-text"></span></div><span class="settlement-detail"></span></div>
+    </article>
+  </template>
+  <script src="/app.js" defer></script>
+</body>
+</html>
