@@ -76,12 +76,9 @@
         storedPredictions.forEach(record => { state.records[state.date][String(record.matchId)] = record; });
         saveRecords();
       }
-      if (state.date === todayLocal()) {
-        // 当天以比赛 API 为准，API 下架的比赛不再从旧快照恢复。
+      if (liveMatches.length) {
+        // 服务端已按“API 当前比赛在前、数据库历史比赛在后”合并排序。
         state.matches = liveMatches;
-        if (liveMatches.length) saveMatchSnapshot(state.date, liveMatches);
-      } else if (liveMatches.length) {
-        state.matches = mergeMatchSnapshots(loadMatchSnapshot(state.date), liveMatches);
         saveMatchSnapshot(state.date, state.matches);
       } else if (!state.matches.length) {
         state.matches = loadMatchSnapshot(state.date);
@@ -104,18 +101,12 @@
     return payload;
   }
   function normalizeMatches(payload) {
-    const upstreamPayload = payload?.data || payload;
-    if (state.date === todayLocal()) {
-      const liveGroups = upstreamPayload?.value?.matchInfoList || [];
-      const liveAll = liveGroups.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate })));
-      const liveChosen = liveAll.filter(match => match.businessDate === state.date || match.matchDate === state.date);
-      return dedupe(liveChosen, match => match.matchId).sort((a, b) => ((a.matchDate || '') + ' ' + (a.matchTime || '')).localeCompare((b.matchDate || '') + ' ' + (b.matchTime || '')));
-    }
     const stored = Array.isArray(payload?.matches) ? payload.matches : [];
     if (stored.length) {
       const chosenStored = stored.filter(match => match.businessDate === state.date || match.matchDate === state.date);
-      if (chosenStored.length) return dedupe(chosenStored, match => match.matchId).sort((a, b) => ((a.matchDate || '') + ' ' + (a.matchTime || '')).localeCompare((b.matchDate || '') + ' ' + (b.matchTime || '')));
+      if (chosenStored.length) return dedupe(chosenStored, match => match.matchId);
     }
+    const upstreamPayload = payload?.data || payload;
     const groups = upstreamPayload?.value?.matchInfoList || [];
     const all = groups.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate })));
     const chosen = all.filter(match => match.businessDate === state.date), fallback = all.filter(match => match.matchDate === state.date), source = chosen.length ? chosen : fallback;
