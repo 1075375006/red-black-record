@@ -16,7 +16,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ### Linux 服务器一键部署
 
-服务器已安装 Docker 和 Docker Compose Plugin 时，直接复制这一条命令即可。它会自动下载 GitHub 最新代码、构建网页镜像、启动 PostgreSQL 和网页服务，不需要手动下载项目：
+在 Ubuntu/Debian 服务器上直接复制这一条命令即可。脚本会自动准备 Docker（如果尚未安装）、下载 GitHub 最新代码、构建网页镜像、启动 PostgreSQL 和网页服务，不需要手动下载项目：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh | sudo bash

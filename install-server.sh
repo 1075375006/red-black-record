@@ -11,9 +11,14 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "未检测到 Docker。请先安装 Docker Engine 和 Docker Compose Plugin。"
-  echo "Ubuntu/Debian 可参考：https://docs.docker.com/engine/install/"
-  exit 1
+  if command -v apt-get >/dev/null 2>&1 && command -v curl >/dev/null 2>&1; then
+    echo "未检测到 Docker，正在自动安装 Docker Engine…"
+    curl -fsSL https://get.docker.com | sh
+    systemctl enable --now docker 2>/dev/null || true
+  else
+    echo "未检测到 Docker，且当前系统无法自动安装。请先安装 Docker Engine。"
+    exit 1
+  fi
 fi
 
 if docker compose version >/dev/null 2>&1; then
@@ -21,8 +26,15 @@ if docker compose version >/dev/null 2>&1; then
 elif command -v docker-compose >/dev/null 2>&1; then
   COMPOSE=(docker-compose)
 else
-  echo "未检测到 Docker Compose，请安装 Docker Compose Plugin 后重试。"
-  exit 1
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "正在安装 Docker Compose Plugin…"
+    apt-get update
+    apt-get install -y docker-compose-plugin
+    COMPOSE=(docker compose)
+  else
+    echo "未检测到 Docker Compose，请安装 Docker Compose Plugin 后重试。"
+    exit 1
+  fi
 fi
 
 command -v curl >/dev/null 2>&1 || { echo "缺少 curl，请先安装 curl。"; exit 1; }
