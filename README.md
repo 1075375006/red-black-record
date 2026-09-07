@@ -14,6 +14,16 @@
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
+### Linux 服务器一键部署
+
+服务器已安装 Docker 和 Docker Compose Plugin 时，直接复制这一条命令即可。它会自动下载 GitHub 最新代码、构建网页镜像、启动 PostgreSQL 和网页服务，不需要手动下载项目：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh | sudo bash
+```
+
+默认安装目录是 `/opt/red-black-record`，数据库数据保存在 Docker volume 中。服务器安全组或防火墙需要放行 `8787` 端口，然后访问 `http://服务器IP:8787`。
+
 ### 手动启动
 
 推荐使用 Docker Compose，一次启动网页和 PostgreSQL 数据库：
