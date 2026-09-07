@@ -25,7 +25,28 @@
   function saveMatchSnapshot(date, matches) { if (!Array.isArray(matches) || !matches.length) return; state.matchSnapshots[date] = matches; localStorage.setItem(MATCHES_STORAGE_KEY, JSON.stringify(state.matchSnapshots)); }
   function dateRecords() { if (!state.records[state.date]) state.records[state.date] = {}; return state.records[state.date]; }
   function getRecord(matchId) { return dateRecords()[String(matchId)] || null; }
-  function setRecord(matchId, record) { dateRecords()[String(matchId)] = record; saveRecords(); }
+  function setRecord(matchId, record) {
+    const normalized = { ...record, updatedAt: record.updatedAt || new Date().toISOString() };
+    dateRecords()[String(matchId)] = normalized;
+    saveRecords();
+    fetch('/api/predictions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        matchId: String(matchId),
+        market: normalized.market || 'had',
+        pick: normalized.pick ?? null,
+        handicapLine: normalized.handicapLine ?? null,
+        note: normalized.note || ''
+      })
+    }).then(async response => {
+      if (!response.ok) {
+        let payload = {};
+        try { payload = await response.json(); } catch {}
+        throw new Error(payload.error || '保存失败');
+      }
+    }).catch(error => showNotice('记录已保存在本地，但同步数据库失败：' + error.message));
+  }
 
   function bindEvents() {
     dateInput.addEventListener('change', () => { if (!dateInput.value) return; state.date = dateInput.value; state.matches = loadMatchSnapshot(state.date); state.results = new Map(); updateDateLabel(); render(); syncAll(); });
@@ -42,9 +63,19 @@
     if (state.syncing) return;
     state.syncing = true; refreshButton.disabled = true; syncStatus.textContent = '同步中…'; syncStatus.className = 'status-pill busy'; hideNotice();
     try {
-      const [matchesResponse, resultsResponse] = await Promise.all([fetchJson('/api/matches'), fetchJson('/api/results?date=' + encodeURIComponent(state.date))]);
-      const liveMatches = normalizeMatches(matchesResponse.data);
+      const [matchesResponse, resultsResponse, predictionsResponse] = await Promise.all([
+        fetchJson('/api/matches?date=' + encodeURIComponent(state.date)),
+        fetchJson('/api/results?date=' + encodeURIComponent(state.date)),
+        fetchJson('/api/predictions?date=' + encodeURIComponent(state.date))
+      ]);
+      const liveMatches = normalizeMatches(matchesResponse);
       const normalizedResults = normalizeResults(resultsResponse.data);
+      const storedPredictions = normalizePredictions(predictionsResponse.predictions);
+      if (storedPredictions.length) {
+        state.records[state.date] = { ...(state.records[state.date] || {}) };
+        storedPredictions.forEach(record => { state.records[state.date][String(record.matchId)] = record; });
+        saveRecords();
+      }
       if (liveMatches.length) {
         state.matches = mergeMatchSnapshots(loadMatchSnapshot(state.date), liveMatches);
         saveMatchSnapshot(state.date, state.matches);
@@ -69,10 +100,26 @@
     return payload;
   }
   function normalizeMatches(payload) {
-    const groups = payload?.value?.matchInfoList || [];
+    const stored = Array.isArray(payload?.matches) ? payload.matches : [];
+    if (stored.length) {
+      const chosenStored = stored.filter(match => match.businessDate === state.date || match.matchDate === state.date);
+      if (chosenStored.length) return dedupe(chosenStored, match => match.matchId).sort((a, b) => ((a.matchDate || '') + ' ' + (a.matchTime || '')).localeCompare((b.matchDate || '') + ' ' + (b.matchTime || '')));
+    }
+    const upstreamPayload = payload?.data || payload;
+    const groups = upstreamPayload?.value?.matchInfoList || [];
     const all = groups.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate })));
     const chosen = all.filter(match => match.businessDate === state.date), fallback = all.filter(match => match.matchDate === state.date), source = chosen.length ? chosen : fallback;
     return dedupe(source, match => match.matchId).sort((a, b) => (a.matchDate + ' ' + a.matchTime).localeCompare(b.matchDate + ' ' + b.matchTime));
+  }
+  function normalizePredictions(list) {
+    return (Array.isArray(list) ? list : []).map(item => ({
+      market: item.market,
+      pick: item.pick ?? null,
+      handicapLine: item.handicapLine === null || item.handicapLine === undefined ? null : Number(item.handicapLine),
+      note: item.note || '',
+      updatedAt: item.updatedAt || '' ,
+      matchId: item.matchId
+    }));
   }
   function normalizeResults(payload) { return new Map((payload?.value?.matchResult || []).map(item => [String(item.matchId), item])); }
   function mergeMatchSnapshots(previous, current) {
@@ -150,5 +197,18 @@
   function formatSavedTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
   function showNotice(message) { notice.textContent = message; notice.hidden = false; }
   function hideNotice() { notice.hidden = true; notice.textContent = ''; }
-  function clearDay() { const records = dateRecords(); if (!Object.keys(records).length) return; if (!window.confirm('确定清空 ' + state.date + ' 的全部预测记录吗？')) return; delete state.records[state.date]; saveRecords(); render(); }
+  async function clearDay() {
+    const records = dateRecords();
+    if (!Object.keys(records).length) return;
+    if (!window.confirm('确定清空 ' + state.date + ' 的全部预测记录吗？')) return;
+    delete state.records[state.date];
+    saveRecords();
+    render();
+    try {
+      const response = await fetch('/api/predictions?date=' + encodeURIComponent(state.date), { method: 'DELETE', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('数据库删除失败');
+    } catch (error) {
+      showNotice('本地记录已清空，但数据库同步失败：' + error.message);
+    }
+  }
 })();

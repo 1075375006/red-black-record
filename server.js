@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -14,6 +15,89 @@ const API = {
 
 const cache = new Map();
 const CACHE_TTL = 45 * 1000;
+const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+
+async function initDb() {
+  if (!pool) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS matches (
+      match_id TEXT PRIMARY KEY,
+      business_date DATE NOT NULL,
+      match_date DATE,
+      match_data JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS matches_business_date_idx ON matches (business_date);
+    CREATE TABLE IF NOT EXISTS predictions (
+      match_id TEXT PRIMARY KEY REFERENCES matches(match_id) ON DELETE CASCADE,
+      market TEXT NOT NULL CHECK (market IN ('had', 'hhad')),
+      pick TEXT CHECK (pick IN ('H', 'D', 'A')),
+      handicap_line NUMERIC,
+      note TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+}
+
+async function saveMatches(matches) {
+  if (!pool || !matches.length) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const match of matches) {
+      await client.query(`
+        INSERT INTO matches (match_id, business_date, match_date, match_data)
+        VALUES ($1, $2::date, $3::date, $4::jsonb)
+        ON CONFLICT (match_id) DO UPDATE SET
+          business_date = EXCLUDED.business_date,
+          match_date = EXCLUDED.match_date,
+          match_data = EXCLUDED.match_data,
+          updated_at = NOW()
+      `, [String(match.matchId), match.businessDate || match.matchDate, match.matchDate || match.businessDate, JSON.stringify(match)]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function getStoredMatches(date) {
+  if (!pool) return [];
+  const result = await pool.query('SELECT match_data AS match FROM matches WHERE business_date = $1 OR match_date = $1 ORDER BY match_date, match_data->>\'matchTime\'', [date]);
+  return result.rows.map(row => row.match);
+}
+
+async function getPredictions(date) {
+  if (!pool) return [];
+  const result = await pool.query(`
+    SELECT p.match_id AS "matchId", p.market, p.pick, p.handicap_line AS "handicapLine", p.note, p.updated_at AS "updatedAt"
+    FROM predictions p JOIN matches m ON m.match_id = p.match_id
+    WHERE m.business_date = $1 OR m.match_date = $1
+  `, [date]);
+  return result.rows;
+}
+
+async function savePrediction(payload) {
+  if (!pool) return;
+  const matchId = String(payload.matchId || '');
+  if (!matchId || !['had', 'hhad'].includes(payload.market)) throw new Error('预测参数不完整');
+  if (payload.pick !== null && !['H', 'D', 'A'].includes(payload.pick)) throw new Error('预测方向不正确');
+  await pool.query(`
+    INSERT INTO predictions (match_id, market, pick, handicap_line, note)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (match_id) DO UPDATE SET
+      market = EXCLUDED.market, pick = EXCLUDED.pick, handicap_line = EXCLUDED.handicap_line,
+      note = EXCLUDED.note, updated_at = NOW()
+  `, [matchId, payload.market, payload.pick || null, payload.handicapLine ?? null, String(payload.note || '').slice(0, 160)]);
+}
+
+async function deletePredictions(date) {
+  if (!pool) return;
+  await pool.query('DELETE FROM predictions p USING matches m WHERE p.match_id = m.match_id AND (m.business_date = $1 OR m.match_date = $1)', [date]);
+}
 
 function json(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -103,14 +187,35 @@ const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
   try {
     if (req.method === 'GET' && requestUrl.pathname === '/api/matches') {
+      const date = requestUrl.searchParams.get('date');
       const data = await getMatches();
-      return json(res, 200, { fetchedAt: new Date().toISOString(), data });
+      const live = data?.value?.matchInfoList?.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate }))) || [];
+      if (pool) await saveMatches(live);
+      const stored = date && validDate(date) ? await getStoredMatches(date) : [];
+      return json(res, 200, { fetchedAt: new Date().toISOString(), data, matches: stored.length ? stored : live });
     }
     if (req.method === 'GET' && requestUrl.pathname === '/api/results') {
       const date = requestUrl.searchParams.get('date');
       if (!validDate(date)) return json(res, 400, { error: '日期格式应为 YYYY-MM-DD' });
       const data = await getResults(date);
       return json(res, 200, { fetchedAt: new Date().toISOString(), data });
+    }
+    if (req.method === 'GET' && requestUrl.pathname === '/api/predictions') {
+      const date = requestUrl.searchParams.get('date');
+      if (!validDate(date)) return json(res, 400, { error: '日期格式应为 YYYY-MM-DD' });
+      return json(res, 200, { predictions: await getPredictions(date) });
+    }
+    if (req.method === 'POST' && requestUrl.pathname === '/api/predictions') {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      await savePrediction(JSON.parse(raw));
+      return json(res, 200, { ok: true });
+    }
+    if (req.method === 'DELETE' && requestUrl.pathname === '/api/predictions') {
+      const date = requestUrl.searchParams.get('date');
+      if (!validDate(date)) return json(res, 400, { error: '日期格式应为 YYYY-MM-DD' });
+      await deletePredictions(date);
+      return json(res, 200, { ok: true });
     }
     if (req.method === 'GET') return serveStatic(req, res, requestUrl.pathname);
     return json(res, 405, { error: '仅支持 GET' });
@@ -120,6 +225,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
+initDb().then(() => server.listen(PORT, () => {
   console.log('红黑记录已启动：http://localhost:' + PORT);
+})).catch(error => {
+  console.error('数据库初始化失败', error);
+  process.exit(1);
 });

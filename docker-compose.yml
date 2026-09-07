@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: red-black-record-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: redblack
+      POSTGRES_USER: redblack
+      POSTGRES_PASSWORD: redblack_local_password
+    volumes:
+      - red_black_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redblack -d redblack"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    container_name: red-black-record-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 8787
+      DATABASE_URL: postgres://redblack:redblack_local_password@db:5432/redblack
+    ports:
+      - "8787:8787"
+
+volumes:
+  red_black_pgdata:

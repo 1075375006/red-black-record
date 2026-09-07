@@ -4,14 +4,34 @@
 
 ## 启动
 
-需要 Node.js 18 或更高版本（使用 Node 原生 fetch，不需要安装第三方依赖）。
+推荐使用 Docker Compose，一次启动网页和 PostgreSQL 数据库：
 
-运行 npm start，然后打开 http://localhost:8787。
+```powershell
+docker compose up -d --build
+```
+
+然后打开 http://localhost:8787。
+
+查看运行状态：
+
+```powershell
+docker compose ps
+```
+
+停止服务（保留数据库数据）：
+
+```powershell
+docker compose down
+```
+
+如果要连同数据库数据一起删除，再执行 `docker compose down -v`。
+
+也可以直接使用 Node.js 18 或更高版本运行 `npm install` 和 `npm start`，此时没有 PostgreSQL 环境，记录会退回保存到当前浏览器的 localStorage。
 
 ## 说明
 
 - 比赛和赛果请求由本地服务转发，服务端会附带竞彩站点需要的请求头，避免浏览器安全策略拦截。
-- 预测记录和已同步的比赛快照都保存在当前浏览器的 localStorage，换日期或接口不再提供历史赛程时也不会丢失；记录以比赛 matchId 关联。
+- Docker 模式下，比赛快照和预测记录保存在 PostgreSQL 数据库中，浏览器 localStorage 作为离线/接口异常时的临时兜底；记录以比赛 matchId 关联。
 - 让球预测保存的是选择当时的让球线，结算时按全场比分重新计算，不直接套用普通胜平负结果。
 - 赛果接口按所选日期到次日查询，用于覆盖跨午夜结束的比赛。
 - 页面每 5 分钟自动同步一次，也可以点击“同步数据”手动刷新。
