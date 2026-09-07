@@ -10,6 +10,13 @@
 docker compose up -d --build
 ```
 
+如果构建时提示无法访问 `auth.docker.io`，先单独拉取网页运行时镜像，再重新启动：
+
+```powershell
+docker pull node:22-alpine
+docker compose up -d --build
+```
+
 然后打开 http://localhost:8787。
 
 查看运行状态：
