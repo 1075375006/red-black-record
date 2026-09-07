@@ -201,9 +201,13 @@ const server = http.createServer(async (req, res) => {
       const liveForDate = date && validDate(date) ? live.filter(match => match.businessDate === date || match.matchDate === date) : live;
       const byId = new Map();
       // API 当前返回的比赛优先，数据库中已有但 API 已下架的比赛排在后面。
-      [...liveForDate, ...stored].forEach(match => {
+      liveForDate.forEach(match => {
         const key = String(match.matchId || '');
-        if (key && !byId.has(key)) byId.set(key, match);
+        if (key) byId.set(key, { ...match, isLive: true });
+      });
+      stored.forEach(match => {
+        const key = String(match.matchId || '');
+        if (key && !byId.has(key)) byId.set(key, { ...match, isLive: false });
       });
       const matches = [...byId.values()];
       return json(res, 200, { fetchedAt: new Date().toISOString(), data, matches, matchesSource: liveForDate.length ? 'live+stored' : 'stored' });
