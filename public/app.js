@@ -1,7 +1,8 @@
 (() => {
   'use strict';
   const STORAGE_KEY = 'red-black-records-v1';
-  const state = { date: todayLocal(), matches: [], results: new Map(), records: loadRecords(), filter: 'all', syncing: false };
+  const MATCHES_STORAGE_KEY = 'red-black-match-snapshots-v1';
+  const state = { date: todayLocal(), matches: loadMatchSnapshot(todayLocal()), results: new Map(), records: loadRecords(), matchSnapshots: loadMatchSnapshots(), filter: 'all', syncing: false };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const dateInput = $('#dateInput'), matchesList = $('#matchesList'), emptyState = $('#emptyState'), notice = $('#notice'), refreshButton = $('#refreshButton'), syncStatus = $('#syncStatus');
@@ -19,19 +20,22 @@
   function shiftDate(dateText, amount) { const date = new Date(dateText + 'T12:00:00'); date.setDate(date.getDate() + amount); return date.toISOString().slice(0, 10); }
   function loadRecords() { try { const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; } }
   function saveRecords() { localStorage.setItem(STORAGE_KEY, JSON.stringify(state.records)); }
+  function loadMatchSnapshots() { try { const parsed = JSON.parse(localStorage.getItem(MATCHES_STORAGE_KEY) || '{}'); return parsed && typeof parsed === 'object' ? parsed : {}; } catch { return {}; } }
+  function loadMatchSnapshot(date) { const snapshots = loadMatchSnapshots(); return Array.isArray(snapshots[date]) ? snapshots[date] : []; }
+  function saveMatchSnapshot(date, matches) { if (!Array.isArray(matches) || !matches.length) return; state.matchSnapshots[date] = matches; localStorage.setItem(MATCHES_STORAGE_KEY, JSON.stringify(state.matchSnapshots)); }
   function dateRecords() { if (!state.records[state.date]) state.records[state.date] = {}; return state.records[state.date]; }
   function getRecord(matchId) { return dateRecords()[String(matchId)] || null; }
   function setRecord(matchId, record) { dateRecords()[String(matchId)] = record; saveRecords(); }
 
   function bindEvents() {
-    dateInput.addEventListener('change', () => { if (!dateInput.value) return; state.date = dateInput.value; state.results = new Map(); updateDateLabel(); syncAll(); });
+    dateInput.addEventListener('change', () => { if (!dateInput.value) return; state.date = dateInput.value; state.matches = loadMatchSnapshot(state.date); state.results = new Map(); updateDateLabel(); render(); syncAll(); });
     $('#prevDay').addEventListener('click', () => changeDate(-1));
     $('#nextDay').addEventListener('click', () => changeDate(1));
     refreshButton.addEventListener('click', () => syncAll());
     $('#clearDay').addEventListener('click', clearDay);
     $$('.filter-tab').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; $$('.filter-tab').forEach(tab => tab.classList.toggle('active', tab === button)); render(); }));
   }
-  function changeDate(amount) { state.date = shiftDate(state.date, amount); dateInput.value = state.date; state.results = new Map(); updateDateLabel(); syncAll(); }
+  function changeDate(amount) { state.date = shiftDate(state.date, amount); dateInput.value = state.date; state.matches = loadMatchSnapshot(state.date); state.results = new Map(); updateDateLabel(); render(); syncAll(); }
   function updateDateLabel() { const date = new Date(state.date + 'T12:00:00'), weekday = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()]; $('#dateText').textContent = state.date.replaceAll('-', '.') + ' · 周' + weekday; }
 
   async function syncAll() {
@@ -39,7 +43,19 @@
     state.syncing = true; refreshButton.disabled = true; syncStatus.textContent = '同步中…'; syncStatus.className = 'status-pill busy'; hideNotice();
     try {
       const [matchesResponse, resultsResponse] = await Promise.all([fetchJson('/api/matches'), fetchJson('/api/results?date=' + encodeURIComponent(state.date))]);
-      state.matches = normalizeMatches(matchesResponse.data); state.results = normalizeResults(resultsResponse.data);
+      const liveMatches = normalizeMatches(matchesResponse.data);
+      const normalizedResults = normalizeResults(resultsResponse.data);
+      if (liveMatches.length) {
+        state.matches = liveMatches;
+        saveMatchSnapshot(state.date, liveMatches);
+      } else if (!state.matches.length) {
+        state.matches = loadMatchSnapshot(state.date);
+        if (!state.matches.length) {
+          state.matches = normalizeResultMatches(resultsResponse.data);
+          saveMatchSnapshot(state.date, state.matches);
+        }
+      }
+      state.results = normalizedResults;
       syncStatus.textContent = '已同步'; syncStatus.className = 'status-pill'; $('#lastSync').textContent = '更新于 ' + formatClock(new Date()); render();
     } catch (error) {
       syncStatus.textContent = '同步失败'; syncStatus.className = 'status-pill error'; showNotice('数据同步失败：' + error.message + '。请检查本地服务是否已启动，或稍后重试。'); render();
@@ -59,6 +75,26 @@
     return dedupe(source, match => match.matchId).sort((a, b) => (a.matchDate + ' ' + a.matchTime).localeCompare(b.matchDate + ' ' + b.matchTime));
   }
   function normalizeResults(payload) { return new Map((payload?.value?.matchResult || []).map(item => [String(item.matchId), item])); }
+  function normalizeResultMatches(payload) {
+    return (payload?.value?.matchResult || [])
+      .filter(item => item.matchDate === state.date)
+      .map(item => ({
+        matchId: item.matchId,
+        matchNum: item.matchNum,
+        matchNumStr: item.matchNumStr,
+        matchDate: item.matchDate,
+        matchTime: '',
+        businessDate: item.matchDate,
+        leagueAbbName: item.leagueNameAbbr || item.leagueName,
+        leagueAllName: item.leagueName,
+        homeTeamAllName: item.allHomeTeam || item.homeTeam,
+        awayTeamAllName: item.allAwayTeam || item.awayTeam,
+        homeTeamAbbName: item.homeTeam,
+        awayTeamAbbName: item.awayTeam,
+        had: {},
+        hhad: item.goalLine !== '' && item.goalLine !== null && item.goalLine !== undefined ? { goalLine: item.goalLine, goalLineValue: item.goalLine } : {}
+      }));
+  }
   function dedupe(list, keyer) { const map = new Map(); list.forEach(item => map.set(String(keyer(item)), item)); return [...map.values()]; }
 
   function render() {
