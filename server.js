@@ -119,6 +119,12 @@ function addDays(dateText, amount) {
   return date.toISOString().slice(0, 10);
 }
 
+function todayLocal() {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  return new Date(utc + 8 * 60 * 60000).toISOString().slice(0, 10);
+}
+
 async function upstream(url) {
   const response = await fetch(url, {
     method: 'GET',
@@ -192,7 +198,9 @@ const server = http.createServer(async (req, res) => {
       const live = data?.value?.matchInfoList?.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate }))) || [];
       if (pool) await saveMatches(live);
       const stored = date && validDate(date) ? await getStoredMatches(date) : [];
-      return json(res, 200, { fetchedAt: new Date().toISOString(), data, matches: stored.length ? stored : live });
+      const liveForDate = date && validDate(date) ? live.filter(match => match.businessDate === date || match.matchDate === date) : live;
+      const matches = date && date !== todayLocal() && !liveForDate.length ? stored : liveForDate;
+      return json(res, 200, { fetchedAt: new Date().toISOString(), data, matches, matchesSource: date === todayLocal() ? 'live' : (liveForDate.length ? 'live' : 'stored') });
     }
     if (req.method === 'GET' && requestUrl.pathname === '/api/results') {
       const date = requestUrl.searchParams.get('date');
