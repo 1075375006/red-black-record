@@ -4,6 +4,7 @@ set -Eeuo pipefail
 REPO="${RED_BLACK_REPO:-1075375006/red-black-record}"
 BRANCH="${RED_BLACK_BRANCH:-main}"
 INSTALL_DIR="${RED_BLACK_DIR:-/opt/red-black-record}"
+WEB_PORT="${RED_BLACK_PORT:-8787}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请使用 root 运行，或执行：sudo bash -c \"curl -fsSL https://raw.githubusercontent.com/${REPO}/${BRANCH}/install-server.sh | bash\""
@@ -54,6 +55,19 @@ find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name 'docker-compose.yml' -exec r
 cp -a "$source_dir"/. "$INSTALL_DIR"/
 cd "$INSTALL_DIR"
 
+port_in_use() {
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnH | awk -v port="$1" '$4 ~ (":" port "$") { found=1 } END { exit found ? 0 : 1 }'
+    return $?
+  fi
+  return 1
+}
+
+while port_in_use "$WEB_PORT"; do
+  WEB_PORT=$((WEB_PORT + 1))
+done
+export WEB_PORT
+
 echo "正在拉取镜像并启动服务…"
 "${COMPOSE[@]}" up -d --build
 "${COMPOSE[@]}" ps
@@ -61,6 +75,7 @@ echo "正在拉取镜像并启动服务…"
 server_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
 echo "部署完成。"
-echo "本机访问：http://127.0.0.1:8787"
-[[ -n "$server_ip" ]] && echo "局域网访问：http://${server_ip}:8787"
+echo "实际端口：${WEB_PORT}"
+echo "本机访问：http://127.0.0.1:${WEB_PORT}"
+[[ -n "$server_ip" ]] && echo "局域网访问：http://${server_ip}:${WEB_PORT}"
 echo "更新命令：curl -fsSL https://raw.githubusercontent.com/${REPO}/${BRANCH}/install-server.sh | sudo bash"

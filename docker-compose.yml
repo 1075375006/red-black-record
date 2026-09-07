@@ -28,7 +28,7 @@ services:
       PORT: 8787
       DATABASE_URL: postgres://redblack:redblack_local_password@db:5432/redblack
     ports:
-      - "8787:8787"
+      - "${WEB_PORT:-8787}:8787"
 
 volumes:
   red_black_pgdata:
