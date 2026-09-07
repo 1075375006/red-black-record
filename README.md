@@ -4,6 +4,18 @@
 
 ## 启动
 
+### Windows 一键安装（推荐）
+
+确认 Docker Desktop 已经启动后，双击项目目录里的 `install.bat` 即可自动完成镜像准备、网页和数据库启动，并打开浏览器。
+
+也可以在 PowerShell 中运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+### 手动启动
+
 推荐使用 Docker Compose，一次启动网页和 PostgreSQL 数据库：
 
 ```powershell
