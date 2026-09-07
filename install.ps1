@@ -27,5 +27,5 @@ Write-Host 'Service status:' -ForegroundColor Yellow
 docker compose ps
 
 Write-Host ''
-Write-Host 'Deployment complete: http://localhost:8787' -ForegroundColor Green
-Start-Process 'http://localhost:8787'
+Write-Host 'Deployment complete: http://localhost:4399' -ForegroundColor Green
+Start-Process 'http://localhost:4399'

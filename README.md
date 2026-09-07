@@ -22,7 +22,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh | sudo bash
 ```
 
-默认安装目录是 `/opt/red-black-record`，数据库数据保存在 Docker volume 中。脚本默认使用 `8787` 端口；如果该端口已被占用，会自动选择下一个可用端口，并在最后输出实际地址。服务器安全组或防火墙需要放行输出的端口。
+默认安装目录是 `/opt/red-black-record`，数据库数据保存在 Docker volume 中。脚本默认使用 `4399` 端口（容器内部仍使用 `8787`）；如果 `4399` 已被占用，会自动选择下一个可用端口，并在最后输出实际地址。服务器安全组或防火墙需要放行输出的端口。
 
 ### 手动启动
 
@@ -39,7 +39,7 @@ docker pull node:22-alpine
 docker compose up -d --build
 ```
 
-然后打开 http://localhost:8787。
+然后打开 http://localhost:4399。
 
 查看运行状态：
 

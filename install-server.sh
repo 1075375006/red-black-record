@@ -4,7 +4,7 @@ set -Eeuo pipefail
 REPO="${RED_BLACK_REPO:-1075375006/red-black-record}"
 BRANCH="${RED_BLACK_BRANCH:-main}"
 INSTALL_DIR="${RED_BLACK_DIR:-/opt/red-black-record}"
-WEB_PORT="${RED_BLACK_PORT:-8787}"
+WEB_PORT="${RED_BLACK_PORT:-4399}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请使用 root 运行，或执行：sudo bash -c \"curl -fsSL https://raw.githubusercontent.com/${REPO}/${BRANCH}/install-server.sh | bash\""
