@@ -46,8 +46,8 @@
       const liveMatches = normalizeMatches(matchesResponse.data);
       const normalizedResults = normalizeResults(resultsResponse.data);
       if (liveMatches.length) {
-        state.matches = liveMatches;
-        saveMatchSnapshot(state.date, liveMatches);
+        state.matches = mergeMatchSnapshots(loadMatchSnapshot(state.date), liveMatches);
+        saveMatchSnapshot(state.date, state.matches);
       } else if (!state.matches.length) {
         state.matches = loadMatchSnapshot(state.date);
         if (!state.matches.length) {
@@ -75,6 +75,14 @@
     return dedupe(source, match => match.matchId).sort((a, b) => (a.matchDate + ' ' + a.matchTime).localeCompare(b.matchDate + ' ' + b.matchTime));
   }
   function normalizeResults(payload) { return new Map((payload?.value?.matchResult || []).map(item => [String(item.matchId), item])); }
+  function mergeMatchSnapshots(previous, current) {
+    const merged = new Map();
+    [...(previous || []), ...(current || [])].forEach(match => {
+      const key = String(match.matchId);
+      merged.set(key, { ...(merged.get(key) || {}), ...match });
+    });
+    return [...merged.values()].sort((a, b) => ((a.matchDate || '') + ' ' + (a.matchTime || '')).localeCompare((b.matchDate || '') + ' ' + (b.matchTime || '')));
+  }
   function normalizeResultMatches(payload) {
     return (payload?.value?.matchResult || [])
       .filter(item => item.matchDate === state.date)
