@@ -69,4 +69,11 @@ docker compose down
 
 如有使用问题或功能建议，欢迎添加微信联系：
 
-![微信二维码](https://image.dooo.ng/c/2025/03/31/67e976e7dac1e.jpg)
+<table align="center" border="1" cellpadding="14" cellspacing="0">
+  <tr>
+    <td align="center">
+      <img src="https://image.dooo.ng/c/2025/03/31/67e976e7dac1e.jpg" width="240" alt="微信二维码" />
+      <br />扫码添加微信
+    </td>
+  </tr>
+</table>
