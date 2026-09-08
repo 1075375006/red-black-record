@@ -161,10 +161,10 @@
   }
   function calculateStats() {
     let picked = 0, unpicked = 0, pending = 0, red = 0, black = 0, settled = 0;
-    state.matches.forEach(match => { const record = getRecord(match.matchId), result = settle(match, record); if (!record?.pick) unpicked++; else picked++; if (result.status === 'pending' && record?.pick) pending++; if (result.status === 'red') red++; if (result.status === 'black') black++; if (result.status === 'red' || result.status === 'black') settled++; });
+    state.matches.forEach(match => { const record = getRecord(match.matchId), rawResult = state.results.get(String(match.matchId)), result = settle(match, record), locked = isMatchLocked(match, rawResult); if (!record?.pick) { if (!locked) unpicked++; } else picked++; if (result.status === 'pending' && record?.pick) pending++; if (result.status === 'red') red++; if (result.status === 'black') black++; if (result.status === 'red' || result.status === 'black') settled++; });
     return { picked, unpicked, pending, red, black, settled };
   }
-  function matchesFilter(match) { const record = getRecord(match.matchId), result = settle(match, record); if (state.filter === 'unpicked') return !record?.pick; if (state.filter === 'pending') return Boolean(record?.pick) && result.status === 'pending'; if (state.filter === 'red' || state.filter === 'black') return result.status === state.filter; return true; }
+  function matchesFilter(match) { const record = getRecord(match.matchId), rawResult = state.results.get(String(match.matchId)), result = settle(match, record); if (state.filter === 'unpicked') return !record?.pick && !isMatchLocked(match, rawResult); if (state.filter === 'pending') return Boolean(record?.pick) && result.status === 'pending'; if (state.filter === 'red' || state.filter === 'black') return result.status === state.filter; return true; }
 
   function renderMatch(match) {
     const fragment = $('#matchTemplate').content.cloneNode(true), card = $('.match-card', fragment), record = getRecord(match.matchId), result = state.results.get(String(match.matchId)), had = match.had || {}, hhad = match.hhad || {}, hasHad = hasOdds(had), hasHhad = hasOdds(hhad);
