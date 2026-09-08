@@ -24,6 +24,16 @@ curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/in
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
+### macOS
+
+安装并启动 Docker Desktop 后，在终端执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
+```
+
+脚本会自动下载最新版代码、启动 Docker Desktop、构建网页和数据库。默认安装到 `~/red-black-record`，默认端口为 `4399`；端口被占用时会自动选择下一个可用端口。
+
 ### 手动 Docker 启动
 
 ```powershell
