@@ -29,10 +29,24 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 安装并启动 Docker Desktop 后，在终端执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
+curl -4fL --retry 5 https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
 ```
 
 脚本会自动下载最新版代码、启动 Docker Desktop、构建网页和数据库。默认安装到 `~/red-black-record`，默认端口为 `4399`；端口被占用时会自动选择下一个可用端口。
+
+如果上述地址仍无法访问，可改用 jsDelivr CDN 获取安装脚本：
+
+```bash
+curl -4fL --retry 5 https://cdn.jsdelivr.net/gh/1075375006/red-black-record@main/install-mac.sh | bash
+```
+
+如果所在网络访问 Docker Hub 或 GitHub 不稳定，脚本会自动强制使用 IPv4、重试并切换备用镜像。也可以手动指定镜像：
+
+```bash
+RED_BLACK_NODE_IMAGE=mirror.gcr.io/library/node:22-alpine \\
+RED_BLACK_POSTGRES_IMAGE=mirror.gcr.io/library/postgres:16-alpine \\
+curl -4fL --retry 5 https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
+```
 
 ### 手动 Docker 启动
 

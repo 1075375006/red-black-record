@@ -2,7 +2,7 @@ name: redblack
 
 services:
   db:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     container_name: red-black-record-db
     restart: unless-stopped
     environment:
@@ -18,7 +18,10 @@ services:
       retries: 20
 
   web:
-    build: .
+    build:
+      context: .
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
     container_name: red-black-record-web
     restart: unless-stopped
     depends_on:
