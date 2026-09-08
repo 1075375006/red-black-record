@@ -1,99 +1,61 @@
 # 红黑记录
 
+一个轻量的足球预测记录网页：同步竞彩比赛，记录胜平负/让球方向和备注，赛果回来后自动判定红黑。
 
+## 一键部署
 
+### Linux 服务器
 
-一个轻量的足球预测记录网页：每天同步竞彩比赛，记录胜平负/让球方向和备注，赛果回来后自动判定“红 / 黑”。
-
-
-
-
-## 启动
-
-
-
-
-### Windows 一键安装（推荐）
-
-
-
-
-确认 Docker Desktop 已经启动后，双击项目目录里的 `install.bat` 即可自动完成镜像准备、网页和数据库启动，并打开浏览器。
-
-
-
-
-也可以在 PowerShell 中运行：
-
-
-
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
-
-
-
-
-### Linux 服务器一键部署
-
-
-
-
-在 Ubuntu/Debian 服务器上直接复制这一条命令即可。脚本会自动准备 Docker（如果尚未安装）、下载 GitHub 最新代码、构建网页镜像、启动 PostgreSQL 和网页服务，不需要手动下载项目：
-
-
-
+Ubuntu/Debian 服务器直接执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh | sudo bash
 ```
 
+脚本会自动下载最新版代码、准备 Docker（缺少时尝试安装）、启动网页和 PostgreSQL。默认安装到 `/opt/red-black-record`，默认端口为 `4399`；若端口被占用，会自动选择下一个可用端口并在输出中显示实际地址。云服务器安全组/防火墙需放行实际端口。
 
+更新部署时重复执行上面的命令即可。Docker volume `redblack_red_black_pgdata` 会保留数据库数据。
 
+### Windows
 
-默认安装目录是 `/opt/red-black-record`，数据库数据保存在 Docker volume 中。网页服务默认使用 `4399` 端口（服务器和容器内部统一）；如果 `4399` 已被占用，会自动选择下一个可用端口，并在最后输出实际地址。服务器安全组或防火墙需要放行输出的端口。
+启动 Docker Desktop 后，双击 `install.bat`，或在 PowerShell 执行：
 
-## 联系我
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
 
-如有使用问题或功能建议，欢迎添加微信联系：
+### 手动 Docker 启动
 
 ```powershell
 docker compose up -d --build
 ```
 
-如果构建时提示无法访问 `auth.docker.io`，先单独拉取网页运行时镜像，再重新启动：
-
-```powershell
-docker pull node:22-alpine
-docker compose up -d --build
-```
-
-然后打开 http://localhost:4399。
-
-查看运行状态：
+网页和容器内部统一使用 `4399` 端口。查看状态、停止服务：
 
 ```powershell
 docker compose ps
-```
-
-停止服务（保留数据库数据）：
-
-```powershell
 docker compose down
 ```
 
-如果要连同数据库数据一起删除，再执行 `docker compose down -v`。
+`docker compose down -v` 会同时删除数据库数据，请谨慎使用。
 
-也可以直接使用 Node.js 18 或更高版本运行 `npm install` 和 `npm start`，此时没有 PostgreSQL 环境，记录会退回保存到当前浏览器的 localStorage。
+## 功能
 
-## 说明
+- 比赛 API 和赛果 API 由本地 Node 服务转发，并附带竞彩站点所需请求头。
+- PostgreSQL 保存比赛快照、预测玩法、方向、让球线和备注；浏览器 localStorage 作为离线兜底。
+- “全部”页面按 API 当前比赛在前、数据库历史比赛在后合并展示，同一场比赛不重复。
+- “待预测”仅显示当前 API 仍可操作且尚未选择方向的比赛。
+- 已下架、过期或已完赛比赛锁定所有操作，原有记录仍可查看。
+- 页面每 5 分钟自动同步，也可手动刷新；赛果同步后自动显示红/黑。
 
-- 比赛和赛果请求由本地服务转发，服务端会附带竞彩站点需要的请求头，避免浏览器安全策略拦截。
-- Docker 模式下，比赛快照和预测记录保存在 PostgreSQL 数据库中，浏览器 localStorage 作为离线/接口异常时的临时兜底；记录以比赛 matchId 关联。
-- 让球预测保存的是选择当时的让球线，结算时按全场比分重新计算，不直接套用普通胜平负结果。
-- 赛果接口按所选日期到次日查询，用于覆盖跨午夜结束的比赛。
-- 页面每 5 分钟自动同步一次，也可以点击“同步数据”手动刷新。
+## 技术结构
+
+- `server.js`：静态网页服务、上游 API 代理、PostgreSQL 初始化与 REST 接口。
+- `public/`：前端页面、样式和交互逻辑。
+- `Dockerfile`：Node 22 Alpine 网页镜像。
+- `docker-compose.yml`：网页容器 + PostgreSQL 16 容器及持久化 volume。
+- `install-server.sh`：Linux 服务器一键部署脚本。
+- `install.bat` / `install.ps1`：Windows 一键部署脚本。
 
 ## 联系我
 
