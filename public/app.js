@@ -63,13 +63,14 @@
     if (state.syncing) return;
     state.syncing = true; refreshButton.disabled = true; syncStatus.textContent = '同步中…'; syncStatus.className = 'status-pill busy'; hideNotice();
     try {
-      const [matchesResponse, resultsResponse, predictionsResponse] = await Promise.all([
+      const [matchesResponse, resultsResponse] = await Promise.all([
         fetchJson('/api/matches?date=' + encodeURIComponent(state.date)),
-        fetchJson('/api/results?date=' + encodeURIComponent(state.date)),
-        fetchJson('/api/predictions?date=' + encodeURIComponent(state.date))
+        fetchJson('/api/results?date=' + encodeURIComponent(state.date))
       ]);
+      // 赛果接口会先在服务端落库并完成结算，再读取数据库中的预测状态。
+      const predictionsResponse = await fetchJson('/api/predictions?date=' + encodeURIComponent(state.date));
       const liveMatches = normalizeMatches(matchesResponse);
-      const normalizedResults = normalizeResults(resultsResponse.data);
+      const normalizedResults = normalizeResults(resultsResponse);
       const storedPredictions = normalizePredictions(predictionsResponse.predictions);
       if (storedPredictions.length) {
         state.records[state.date] = { ...(state.records[state.date] || {}) };
@@ -118,11 +119,14 @@
       pick: item.pick ?? null,
       handicapLine: item.handicapLine === null || item.handicapLine === undefined ? null : Number(item.handicapLine),
       note: item.note || '',
+      resultOutcome: item.resultOutcome || null,
+      settlementStatus: item.settlementStatus || 'pending',
+      settledAt: item.settledAt || null,
       updatedAt: item.updatedAt || '' ,
       matchId: item.matchId
     }));
   }
-  function normalizeResults(payload) { return new Map((payload?.value?.matchResult || []).map(item => [String(item.matchId), item])); }
+  function normalizeResults(payload) { const list = Array.isArray(payload?.results) ? payload.results : (payload?.data?.value?.matchResult || payload?.value?.matchResult || []); return new Map(list.map(item => [String(item.matchId), item])); }
   function mergeMatchSnapshots(previous, current) {
     const merged = new Map();
     [...(previous || []), ...(current || [])].forEach(match => {
@@ -195,7 +199,7 @@
   function scoreParts(result) { if (!result || !validScore(result.sectionsNo999)) return null; const [, home, away] = String(result.sectionsNo999).match(/^(\d+)\s*:\s*(\d+)$/); return { home: Number(home), away: Number(away) }; }
   function isFinishedResult(result) { const score = scoreParts(result); return Boolean(score && (result.poolStatus === 'Payout' || String(result.matchResultStatus) === '2' || result.winFlag)); }
   function resultOutcome(result, market, handicapLine) { const score = scoreParts(result); if (!score) return null; if (market === 'hhad') { const line = numberOrNull(handicapLine ?? result.goalLine); if (line === null) return null; const adjusted = score.home + line; return adjusted > score.away ? 'H' : adjusted === score.away ? 'D' : 'A'; } return score.home > score.away ? 'H' : score.home === score.away ? 'D' : 'A'; }
-  function settle(match, record) { const result = state.results.get(String(match.matchId)); if (!record?.pick || !result || !isFinishedResult(result)) return { status: 'pending', detail: '' }; const outcome = resultOutcome(result, record.market || 'had', record.handicapLine); if (!outcome) return { status: 'pending', detail: '' }; const labels = record.market === 'hhad' ? { H: '让胜', D: '让平', A: '让负' } : { H: '胜', D: '平', A: '负' }; const line = record.market === 'hhad' && record.handicapLine !== null && record.handicapLine !== undefined ? ' · 主' + formatLine(record.handicapLine) : ''; return { status: outcome === record.pick ? 'red' : 'black', detail: '赛果 ' + labels[outcome] + line }; }
+  function settle(match, record) { const result = state.results.get(String(match.matchId)); if (!record?.pick) return { status: 'pending', detail: '' }; const labels = record.market === 'hhad' ? { H: '让胜', D: '让平', A: '让负' } : { H: '胜', D: '平', A: '负' }; const line = record.market === 'hhad' && record.handicapLine !== null && record.handicapLine !== undefined ? ' · 主' + formatLine(record.handicapLine) : ''; if ((record.settlementStatus === 'red' || record.settlementStatus === 'black') && record.resultOutcome) return { status: record.settlementStatus, detail: '赛果 ' + labels[record.resultOutcome] + line }; if (!result || !isFinishedResult(result)) return { status: 'pending', detail: '' }; const outcome = resultOutcome(result, record.market || 'had', record.handicapLine); if (!outcome) return { status: 'pending', detail: '' }; return { status: outcome === record.pick ? 'red' : 'black', detail: '赛果 ' + labels[outcome] + line }; }
   function resultScore(result) { return scoreParts(result) ? result.sectionsNo999.replace(/\s/g, '') : ''; }
   function formatClock(date) { return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
   function formatSavedTime(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }

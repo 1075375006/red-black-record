@@ -34,8 +34,29 @@ async function initDb() {
       pick TEXT CHECK (pick IN ('H', 'D', 'A')),
       handicap_line NUMERIC,
       note TEXT NOT NULL DEFAULT '',
+      result_outcome TEXT,
+      settlement_status TEXT NOT NULL DEFAULT 'pending',
+      settled_at TIMESTAMPTZ,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE predictions ADD COLUMN IF NOT EXISTS result_outcome TEXT;
+    ALTER TABLE predictions ADD COLUMN IF NOT EXISTS settlement_status TEXT NOT NULL DEFAULT 'pending';
+    ALTER TABLE predictions ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS match_results (
+      match_id TEXT PRIMARY KEY,
+      business_date DATE NOT NULL,
+      match_date DATE,
+      home_score INTEGER,
+      away_score INTEGER,
+      goal_line NUMERIC,
+      had_outcome TEXT,
+      is_finished BOOLEAN NOT NULL DEFAULT FALSE,
+      result_data JSONB NOT NULL,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS match_results_business_date_idx ON match_results (business_date);
+    CREATE INDEX IF NOT EXISTS match_results_match_date_idx ON match_results (match_date);
   `);
 }
 
@@ -70,10 +91,125 @@ async function getStoredMatches(date) {
   return result.rows.map(row => row.match);
 }
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function resultScoreParts(result) {
+  const match = String(result?.sectionsNo999 || '').match(/^(\d+)\s*:\s*(\d+)$/);
+  return match ? { home: Number(match[1]), away: Number(match[2]) } : null;
+}
+
+function resultIsFinished(result) {
+  return Boolean(resultScoreParts(result) && (result?.poolStatus === 'Payout' || String(result?.matchResultStatus) === '2' || result?.winFlag));
+}
+
+function outcomeFromScore(home, away, handicapLine = 0) {
+  const adjustedHome = home + handicapLine;
+  return adjustedHome > away ? 'H' : adjustedHome === away ? 'D' : 'A';
+}
+
+async function saveResults(items, requestedDate) {
+  if (!pool || !items.length) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const item of items) {
+      const matchId = String(item.matchId || '');
+      if (!matchId) continue;
+      const score = resultScoreParts(item);
+      const finished = resultIsFinished(item);
+      const businessDateResult = await client.query('SELECT business_date FROM matches WHERE match_id = $1', [matchId]);
+      const businessDate = businessDateResult.rows[0]?.business_date || requestedDate || item.matchDate;
+      await client.query(`
+        INSERT INTO match_results (
+          match_id, business_date, match_date, home_score, away_score,
+          goal_line, had_outcome, is_finished, result_data, fetched_at
+        ) VALUES ($1, $2::date, $3::date, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+        ON CONFLICT (match_id) DO UPDATE SET
+          business_date = EXCLUDED.business_date,
+          match_date = EXCLUDED.match_date,
+          home_score = EXCLUDED.home_score,
+          away_score = EXCLUDED.away_score,
+          goal_line = EXCLUDED.goal_line,
+          had_outcome = EXCLUDED.had_outcome,
+          is_finished = EXCLUDED.is_finished,
+          result_data = EXCLUDED.result_data,
+          fetched_at = NOW(),
+          updated_at = NOW()
+      `, [
+        matchId,
+        businessDate,
+        item.matchDate || businessDate,
+        score?.home ?? null,
+        score?.away ?? null,
+        numberOrNull(item.goalLine),
+        finished && score ? outcomeFromScore(score.home, score.away) : null,
+        finished,
+        JSON.stringify(item)
+      ]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function settlePredictions(matchIds = null) {
+  if (!pool) return;
+  const params = [];
+  let where = 'r.is_finished = TRUE AND p.pick IS NOT NULL';
+  if (Array.isArray(matchIds) && matchIds.length) {
+    params.push(matchIds.map(String));
+    where += ' AND p.match_id = ANY($1::text[])';
+  }
+  const result = await pool.query(`
+    SELECT p.match_id, p.market, p.pick, p.handicap_line,
+           r.home_score, r.away_score, r.goal_line
+    FROM predictions p JOIN match_results r ON r.match_id = p.match_id
+    WHERE ${where}
+  `, params);
+  for (const row of result.rows) {
+    const line = row.market === 'hhad' ? numberOrNull(row.handicap_line ?? row.goal_line) : 0;
+    if (line === null || row.home_score === null || row.away_score === null) continue;
+    const actual = outcomeFromScore(Number(row.home_score), Number(row.away_score), line);
+    const status = actual === row.pick ? 'red' : 'black';
+    await pool.query(`
+      UPDATE predictions
+      SET result_outcome = $2, settlement_status = $3,
+          settled_at = CASE
+            WHEN result_outcome IS DISTINCT FROM $2 OR settlement_status IS DISTINCT FROM $3 THEN NOW()
+            ELSE COALESCE(settled_at, NOW())
+          END
+      WHERE match_id = $1
+    `, [row.match_id, actual, status]);
+  }
+}
+
+async function getStoredResults(date) {
+  if (!pool) return [];
+  const result = await pool.query(`
+    SELECT result_data AS result
+    FROM match_results
+    WHERE business_date = $1 OR match_date = $1
+    ORDER BY match_date, match_id
+  `, [date]);
+  return result.rows.map(row => row.result);
+}
+
 async function getPredictions(date) {
   if (!pool) return [];
   const result = await pool.query(`
-    SELECT p.match_id AS "matchId", p.market, p.pick, p.handicap_line AS "handicapLine", p.note, p.updated_at AS "updatedAt"
+    SELECT p.match_id AS "matchId", p.market, p.pick,
+           p.handicap_line AS "handicapLine", p.note,
+           p.result_outcome AS "resultOutcome",
+           p.settlement_status AS "settlementStatus",
+           p.settled_at AS "settledAt", p.updated_at AS "updatedAt"
     FROM predictions p JOIN matches m ON m.match_id = p.match_id
     WHERE m.business_date = $1 OR m.match_date = $1
   `, [date]);
@@ -85,12 +221,15 @@ async function savePrediction(payload) {
   const matchId = String(payload.matchId || '');
   if (!matchId || !['had', 'hhad'].includes(payload.market)) throw new Error('预测参数不完整');
   if (payload.pick !== null && !['H', 'D', 'A'].includes(payload.pick)) throw new Error('预测方向不正确');
+  const locked = await pool.query('SELECT is_finished FROM match_results WHERE match_id = $1', [matchId]);
+  if (locked.rows[0]?.is_finished) throw new Error('比赛已经完赛，预测记录已锁定');
   await pool.query(`
     INSERT INTO predictions (match_id, market, pick, handicap_line, note)
     VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (match_id) DO UPDATE SET
       market = EXCLUDED.market, pick = EXCLUDED.pick, handicap_line = EXCLUDED.handicap_line,
-      note = EXCLUDED.note, updated_at = NOW()
+      note = EXCLUDED.note, result_outcome = NULL, settlement_status = 'pending',
+      settled_at = NULL, updated_at = NOW()
   `, [matchId, payload.market, payload.pick || null, payload.handicapLine ?? null, String(payload.note || '').slice(0, 160)]);
 }
 
@@ -166,6 +305,27 @@ async function getResults(date) {
   return cached('results:' + date, () => upstream(API.results + '?' + query.toString()));
 }
 
+async function syncResultsForDate(date) {
+  const data = await getResults(date);
+  const items = data?.value?.matchResult || [];
+  if (pool && items.length) {
+    await saveResults(items, date);
+    await settlePredictions(items.map(item => String(item.matchId)).filter(Boolean));
+  }
+  return { data, results: pool ? await getStoredResults(date) : items };
+}
+
+async function syncRecentResults() {
+  for (const amount of [0, -1, -2]) {
+    const date = addDays(todayLocal(), amount);
+    try {
+      await syncResultsForDate(date);
+    } catch (error) {
+      console.error('自动同步赛果失败：' + date, error.message);
+    }
+  }
+}
+
 function safeFile(filePath) {
   const absolute = path.resolve(PUBLIC_DIR, filePath.replace(/^[/\\]+/, ''));
   return absolute.startsWith(path.resolve(PUBLIC_DIR)) ? absolute : null;
@@ -215,8 +375,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && requestUrl.pathname === '/api/results') {
       const date = requestUrl.searchParams.get('date');
       if (!validDate(date)) return json(res, 400, { error: '日期格式应为 YYYY-MM-DD' });
-      const data = await getResults(date);
-      return json(res, 200, { fetchedAt: new Date().toISOString(), data });
+      try {
+        const synced = await syncResultsForDate(date);
+        return json(res, 200, { fetchedAt: new Date().toISOString(), ...synced, source: 'live+stored' });
+      } catch (error) {
+        const stored = await getStoredResults(date);
+        if (!stored.length) throw error;
+        return json(res, 200, {
+          fetchedAt: new Date().toISOString(),
+          data: { success: true, errorCode: '0', value: { matchResult: stored } },
+          results: stored,
+          source: 'stored'
+        });
+      }
     }
     if (req.method === 'GET' && requestUrl.pathname === '/api/predictions') {
       const date = requestUrl.searchParams.get('date');
@@ -245,6 +416,8 @@ const server = http.createServer(async (req, res) => {
 
 initDb().then(() => server.listen(PORT, () => {
   console.log('红黑记录已启动：http://localhost:' + PORT);
+  setTimeout(syncRecentResults, 5000);
+  setInterval(syncRecentResults, 60 * 60 * 1000);
 })).catch(error => {
   console.error('数据库初始化失败', error);
   process.exit(1);
