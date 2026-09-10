@@ -87,7 +87,7 @@ async function saveMatches(matches) {
 
 async function getStoredMatches(date) {
   if (!pool) return [];
-  const result = await pool.query('SELECT match_data AS match FROM matches WHERE business_date = $1 OR match_date = $1 ORDER BY match_date, match_data->>\'matchTime\'', [date]);
+  const result = await pool.query('SELECT match_data AS match FROM matches WHERE business_date = $1 ORDER BY match_date, match_data->>\'matchTime\'', [date]);
   return result.rows.map(row => row.match);
 }
 
@@ -111,6 +111,27 @@ function outcomeFromScore(home, away, handicapLine = 0) {
   return adjustedHome > away ? 'H' : adjustedHome === away ? 'D' : 'A';
 }
 
+const WEEKDAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function weekdayName(dateText) {
+  if (!validDate(dateText)) return '';
+  return WEEKDAY_NAMES[new Date(dateText + 'T12:00:00+08:00').getUTCDay()];
+}
+
+function inferResultBusinessDate(item, fallbackDate) {
+  const matchNumber = String(item?.matchNumStr || '');
+  const numberedWeekday = WEEKDAY_NAMES.find(name => matchNumber.startsWith(name));
+  const matchDate = validDate(item?.matchDate) ? item.matchDate : '';
+  if (numberedWeekday && matchDate) {
+    for (let daysBack = 0; daysBack < 7; daysBack++) {
+      const candidate = addDays(matchDate, -daysBack);
+      if (weekdayName(candidate) === numberedWeekday) return candidate;
+    }
+  }
+  if (numberedWeekday && validDate(fallbackDate) && weekdayName(fallbackDate) === numberedWeekday) return fallbackDate;
+  return matchDate || fallbackDate;
+}
+
 async function saveResults(items, requestedDate) {
   if (!pool || !items.length) return;
   const client = await pool.connect();
@@ -122,7 +143,7 @@ async function saveResults(items, requestedDate) {
       const score = resultScoreParts(item);
       const finished = resultIsFinished(item);
       const businessDateResult = await client.query('SELECT business_date FROM matches WHERE match_id = $1', [matchId]);
-      const businessDate = businessDateResult.rows[0]?.business_date || requestedDate || item.matchDate;
+      const businessDate = businessDateResult.rows[0]?.business_date || inferResultBusinessDate(item, requestedDate);
       await client.query(`
         INSERT INTO match_results (
           match_id, business_date, match_date, home_score, away_score,
@@ -196,7 +217,7 @@ async function getStoredResults(date) {
   const result = await pool.query(`
     SELECT result_data AS result
     FROM match_results
-    WHERE business_date = $1 OR match_date = $1
+    WHERE business_date = $1
     ORDER BY match_date, match_id
   `, [date]);
   return result.rows.map(row => row.result);
@@ -211,7 +232,7 @@ async function getPredictions(date) {
            p.settlement_status AS "settlementStatus",
            p.settled_at AS "settledAt", p.updated_at AS "updatedAt"
     FROM predictions p JOIN matches m ON m.match_id = p.match_id
-    WHERE m.business_date = $1 OR m.match_date = $1
+    WHERE m.business_date = $1
   `, [date]);
   return result.rows;
 }
@@ -235,7 +256,7 @@ async function savePrediction(payload) {
 
 async function deletePredictions(date) {
   if (!pool) return;
-  await pool.query('DELETE FROM predictions p USING matches m WHERE p.match_id = m.match_id AND (m.business_date = $1 OR m.match_date = $1)', [date]);
+  await pool.query('DELETE FROM predictions p USING matches m WHERE p.match_id = m.match_id AND m.business_date = $1', [date]);
 }
 
 function json(res, status, payload) {
@@ -312,7 +333,7 @@ async function syncResultsForDate(date) {
     await saveResults(items, date);
     await settlePredictions(items.map(item => String(item.matchId)).filter(Boolean));
   }
-  return { data, results: pool ? await getStoredResults(date) : items };
+  return { data, results: pool ? await getStoredResults(date) : items.filter(item => inferResultBusinessDate(item, date) === date) };
 }
 
 async function syncRecentResults() {
@@ -358,7 +379,7 @@ const server = http.createServer(async (req, res) => {
       const live = data?.value?.matchInfoList?.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate }))) || [];
       if (pool) await saveMatches(live);
       const stored = date && validDate(date) ? await getStoredMatches(date) : [];
-      const liveForDate = date && validDate(date) ? live.filter(match => match.businessDate === date || match.matchDate === date) : live;
+      const liveForDate = date && validDate(date) ? live.filter(match => match.businessDate === date) : live;
       const byId = new Map();
       // API 当前返回的比赛优先，数据库中已有但 API 已下架的比赛排在后面。
       liveForDate.forEach(match => {

@@ -84,7 +84,7 @@
       } else if (!state.matches.length) {
         state.matches = loadMatchSnapshot(state.date);
         if (!state.matches.length) {
-          state.matches = normalizeResultMatches(resultsResponse.data);
+          state.matches = normalizeResultMatches(resultsResponse);
           saveMatchSnapshot(state.date, state.matches);
         }
       }
@@ -104,14 +104,14 @@
   function normalizeMatches(payload) {
     const stored = Array.isArray(payload?.matches) ? payload.matches : [];
     if (stored.length) {
-      const chosenStored = stored.filter(match => match.businessDate === state.date || match.matchDate === state.date);
+      const chosenStored = stored.filter(match => match.businessDate === state.date);
       if (chosenStored.length) return dedupe(chosenStored, match => match.matchId);
     }
     const upstreamPayload = payload?.data || payload;
     const groups = upstreamPayload?.value?.matchInfoList || [];
     const all = groups.flatMap(group => (group.subMatchList || []).map(match => ({ ...match, businessDate: match.businessDate || group.businessDate })));
-    const chosen = all.filter(match => match.businessDate === state.date), fallback = all.filter(match => match.matchDate === state.date), source = chosen.length ? chosen : fallback;
-    return dedupe(source, match => match.matchId).sort((a, b) => (a.matchDate + ' ' + a.matchTime).localeCompare(b.matchDate + ' ' + b.matchTime));
+    const chosen = all.filter(match => match.businessDate === state.date);
+    return dedupe(chosen, match => match.matchId).sort((a, b) => (a.matchDate + ' ' + a.matchTime).localeCompare(b.matchDate + ' ' + b.matchTime));
   }
   function normalizePredictions(list) {
     return (Array.isArray(list) ? list : []).map(item => ({
@@ -136,15 +136,16 @@
     return [...merged.values()].sort((a, b) => ((a.matchDate || '') + ' ' + (a.matchTime || '')).localeCompare((b.matchDate || '') + ' ' + (b.matchTime || '')));
   }
   function normalizeResultMatches(payload) {
-    return (payload?.value?.matchResult || [])
-      .filter(item => item.matchDate === state.date)
+    const list = Array.isArray(payload?.results) ? payload.results : (payload?.data?.value?.matchResult || payload?.value?.matchResult || []);
+    return list
+      .filter(item => resultBusinessDate(item) === state.date)
       .map(item => ({
         matchId: item.matchId,
         matchNum: item.matchNum,
         matchNumStr: item.matchNumStr,
         matchDate: item.matchDate,
         matchTime: '',
-        businessDate: item.matchDate,
+        businessDate: state.date,
         leagueAbbName: item.leagueNameAbbr || item.leagueName,
         leagueAllName: item.leagueName,
         homeTeamAllName: item.allHomeTeam || item.homeTeam,
@@ -154,6 +155,18 @@
         had: {},
         hhad: item.goalLine !== '' && item.goalLine !== null && item.goalLine !== undefined ? { goalLine: item.goalLine, goalLineValue: item.goalLine } : {}
       }));
+  }
+  function resultBusinessDate(item) {
+    const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const numberedWeekday = weekdays.find(name => String(item?.matchNumStr || '').startsWith(name));
+    if (numberedWeekday && /^\d{4}-\d{2}-\d{2}$/.test(item?.matchDate || '')) {
+      for (let daysBack = 0; daysBack < 7; daysBack++) {
+        const candidate = shiftDate(item.matchDate, -daysBack);
+        const weekday = weekdays[new Date(candidate + 'T12:00:00').getDay()];
+        if (weekday === numberedWeekday) return candidate;
+      }
+    }
+    return item?.matchDate || '';
   }
   function dedupe(list, keyer) { const map = new Map(); list.forEach(item => map.set(String(keyer(item)), item)); return [...map.values()]; }
 
