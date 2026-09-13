@@ -2,12 +2,13 @@
   'use strict';
   const STORAGE_KEY = 'red-black-records-v1';
   const MATCHES_STORAGE_KEY = 'red-black-match-snapshots-v1';
-  const state = { date: todayLocal(), matches: loadMatchSnapshot(todayLocal()), results: new Map(), records: loadRecords(), matchSnapshots: loadMatchSnapshots(), filter: 'all', syncing: false };
+  const state = { date: todayLocal(), matches: loadMatchSnapshot(todayLocal()), results: new Map(), records: loadRecords(), matchSnapshots: loadMatchSnapshots(), filter: 'all', syncing: false, authenticated: false, username: null };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   const dateInput = $('#dateInput'), matchesList = $('#matchesList'), emptyState = $('#emptyState'), notice = $('#notice'), refreshButton = $('#refreshButton'), syncStatus = $('#syncStatus');
   dateInput.value = state.date;
   updateDateLabel();
+  checkAuthStatus();
   bindEvents();
   render();
   syncAll();
@@ -26,6 +27,11 @@
   function dateRecords() { if (!state.records[state.date]) state.records[state.date] = {}; return state.records[state.date]; }
   function getRecord(matchId) { return dateRecords()[String(matchId)] || null; }
   function setRecord(matchId, record) {
+    if (!state.authenticated) {
+      showNotice('请先登录后再记录预测');
+      setTimeout(() => { window.location.href = '/login.html'; }, 2000);
+      return;
+    }
     const normalized = { ...record, updatedAt: record.updatedAt || new Date().toISOString() };
     dateRecords()[String(matchId)] = normalized;
     saveRecords();
@@ -43,6 +49,13 @@
       if (!response.ok) {
         let payload = {};
         try { payload = await response.json(); } catch {}
+        if (response.status === 401) {
+          showNotice('登录已过期，请重新登录');
+          state.authenticated = false;
+          updateAuthUI();
+          setTimeout(() => { window.location.href = '/login.html'; }, 2000);
+          return;
+        }
         throw new Error(payload.error || '保存失败');
       }
     }).catch(error => showNotice('记录已保存在本地，但同步数据库失败：' + error.message));
@@ -55,6 +68,40 @@
     refreshButton.addEventListener('click', () => syncAll());
     $('#clearDay').addEventListener('click', clearDay);
     $$('.filter-tab').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; $$('.filter-tab').forEach(tab => tab.classList.toggle('active', tab === button)); render(); }));
+  }
+
+  async function checkAuthStatus() {
+    try {
+      const response = await fetch('/api/auth/status');
+      const data = await response.json();
+      state.authenticated = data.authenticated;
+      state.username = data.username;
+      updateAuthUI();
+    } catch (error) {
+      console.error('检查登录状态失败', error);
+    }
+  }
+
+  function updateAuthUI() {
+    const clockLabel = $('#clockLabel');
+    if (state.authenticated) {
+      clockLabel.innerHTML = `<span style="color: rgba(110, 231, 183, 0.9);">已登录：${state.username}</span> · <a href="/change-password.html" style="color: #38bdf8; text-decoration: none;">修改密码</a> · <a href="#" id="logoutLink" style="color: #fca5a5; text-decoration: none;">退出</a>`;
+      const logoutLink = $('#logoutLink');
+      if (logoutLink) {
+        logoutLink.addEventListener('click', async (e) => {
+          e.preventDefault();
+          if (!confirm('确定要退出登录吗？')) return;
+          try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+            window.location.reload();
+          } catch (error) {
+            showNotice('退出失败：' + error.message);
+          }
+        });
+      }
+    } else {
+      clockLabel.innerHTML = `<span style="color: rgba(252, 165, 165, 0.9);">未登录</span> · <a href="/login.html" style="color: #38bdf8; text-decoration: none;">立即登录</a>`;
+    }
   }
   function changeDate(amount) { state.date = shiftDate(state.date, amount); dateInput.value = state.date; state.matches = loadMatchSnapshot(state.date); state.results = new Map(); updateDateLabel(); render(); syncAll(); }
   function updateDateLabel() { const date = new Date(state.date + 'T12:00:00'), weekday = ['日', '一', '二', '三', '四', '五', '六'][date.getDay()]; $('#dateText').textContent = state.date.replaceAll('-', '.') + ' · 周' + weekday; }
@@ -195,9 +242,9 @@
     const lineChip = $('.line-chip', card); if (market === 'hhad' && odds.goalLineValue !== undefined && odds.goalLineValue !== '') { lineChip.textContent = '主 ' + formatLine(odds.goalLineValue); lineChip.style.display = 'inline-block'; }
     $$('.market-switch button', card).forEach(button => { const enabled = button.dataset.market === 'had' ? hasHad : hasHhad; button.disabled = locked || !enabled; button.classList.toggle('active', button.dataset.market === market); button.addEventListener('click', () => { if (locked || !enabled) return; setRecord(match.matchId, { ...(getRecord(match.matchId) || {}), market: button.dataset.market, pick: null, handicapLine: null }); render(); }); });
     const labels = market === 'hhad' ? ['让胜', '让平', '让负'] : ['胜', '平', '负'];
-    $$('.pick-buttons button', card).forEach((button, index) => { button.querySelector('.pick-main').textContent = labels[index]; button.disabled = locked; button.classList.toggle('active', record?.market === market && record?.pick === button.dataset.pick); button.addEventListener('click', () => { if (locked) return; const currentOdds = market === 'hhad' ? hhad : had; setRecord(match.matchId, { ...(getRecord(match.matchId) || {}), market, pick: button.dataset.pick, handicapLine: market === 'hhad' ? numberOrNull(currentOdds.goalLineValue ?? currentOdds.goalLine) : null, note: $('.note-input', card).value.trim(), updatedAt: new Date().toISOString() }); render(); }); });
+    $$('.pick-buttons button', card).forEach((button, index) => { button.querySelector('.pick-main').textContent = labels[index]; button.disabled = locked; button.classList.toggle('active', record?.market === market && record?.pick === button.dataset.pick); button.addEventListener('click', () => { if (locked) return; if (!state.authenticated) { showNotice('请先登录后再记录预测'); setTimeout(() => { window.location.href = '/login.html'; }, 2000); return; } const currentOdds = market === 'hhad' ? hhad : had; setRecord(match.matchId, { ...(getRecord(match.matchId) || {}), market, pick: button.dataset.pick, handicapLine: market === 'hhad' ? numberOrNull(currentOdds.goalLineValue ?? currentOdds.goalLine) : null, note: $('.note-input', card).value.trim(), updatedAt: new Date().toISOString() }); render(); }); });
     const noteInput = $('.note-input', card); noteInput.value = record?.note || ''; noteInput.readOnly = locked; $('.saved-label', card).textContent = record?.updatedAt ? '已保存 ' + formatSavedTime(record.updatedAt) : '';
-    const saveButton = $('.save-button', card); saveButton.disabled = locked; saveButton.addEventListener('click', () => { if (locked) return; const current = getRecord(match.matchId) || { market, pick: null, handicapLine: null }; setRecord(match.matchId, { ...current, market, note: noteInput.value.trim(), updatedAt: new Date().toISOString() }); render(); });
+    const saveButton = $('.save-button', card); saveButton.disabled = locked; saveButton.addEventListener('click', () => { if (locked) return; if (!state.authenticated) { showNotice('请先登录后再保存记录'); setTimeout(() => { window.location.href = '/login.html'; }, 2000); return; } const current = getRecord(match.matchId) || { market, pick: null, handicapLine: null }; setRecord(match.matchId, { ...current, market, note: noteInput.value.trim(), updatedAt: new Date().toISOString() }); render(); });
     const settlementRow = $('.settlement-row', card), settlementText = $('.settlement-text', card), settlementDetail = $('.settlement-detail', card);
     if (locked && !record?.pick) { settlementText.textContent = '已锁定 · 比赛已过期'; settlementDetail.textContent = '已过期比赛不可修改预测'; } else if (!record?.pick) { settlementText.textContent = '还没有留下预测'; settlementDetail.textContent = '选择一个方向开始记录'; } else if (settlement.status === 'red') { settlementRow.classList.add('red'); settlementText.textContent = '红 · 预测命中'; settlementDetail.textContent = settlement.detail; } else if (settlement.status === 'black') { settlementRow.classList.add('black'); settlementText.textContent = '黑 · 预测未中'; settlementDetail.textContent = settlement.detail; } else { settlementRow.classList.add('pending'); settlementText.textContent = '等待赛果'; settlementDetail.textContent = result && !isFinishedResult(result) ? '官方结果尚未结算' : '赛后自动判断红黑'; }
     return fragment;
@@ -219,6 +266,11 @@
   function showNotice(message) { notice.textContent = message; notice.hidden = false; }
   function hideNotice() { notice.hidden = true; notice.textContent = ''; }
   async function clearDay() {
+    if (!state.authenticated) {
+      showNotice('请先登录后再清空记录');
+      setTimeout(() => { window.location.href = '/login.html'; }, 2000);
+      return;
+    }
     const records = dateRecords();
     if (!Object.keys(records).length) return;
     if (!window.confirm('确定清空 ' + state.date + ' 的全部预测记录吗？')) return;
@@ -227,7 +279,17 @@
     render();
     try {
       const response = await fetch('/api/predictions?date=' + encodeURIComponent(state.date), { method: 'DELETE', headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error('数据库删除失败');
+      if (!response.ok) {
+        const payload = await response.json();
+        if (response.status === 401) {
+          showNotice('登录已过期，请重新登录');
+          state.authenticated = false;
+          updateAuthUI();
+          setTimeout(() => { window.location.href = '/login.html'; }, 2000);
+          return;
+        }
+        throw new Error(payload.error || '数据库删除失败');
+      }
     } catch (error) {
       showNotice('本地记录已清空，但数据库同步失败：' + error.message);
     }

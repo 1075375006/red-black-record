@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { Pool } = require('pg');
+const AuthModule = require('./auth');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -16,6 +17,7 @@ const API = {
 const cache = new Map();
 const CACHE_TTL = 45 * 1000;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const auth = new AuthModule(pool);
 
 async function initDb() {
   if (!pool) return;
@@ -58,6 +60,8 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS match_results_business_date_idx ON match_results (business_date);
     CREATE INDEX IF NOT EXISTS match_results_match_date_idx ON match_results (match_date);
   `);
+  // 初始化认证模块
+  await auth.initDb();
 }
 
 async function saveMatches(matches) {
@@ -373,6 +377,51 @@ function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
   try {
+    // 认证相关接口
+    if (req.method === 'POST' && requestUrl.pathname === '/api/auth/login') {
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const { username, password } = JSON.parse(raw);
+      const { token, expiresAt } = await auth.login(username, password);
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': auth.generateSetCookieHeader(token, expiresAt),
+        'Cache-Control': 'no-store'
+      });
+      return res.end(JSON.stringify({ ok: true, expiresAt }));
+    }
+    if (req.method === 'POST' && requestUrl.pathname === '/api/auth/logout') {
+      const session = await auth.middleware(req);
+      if (session) {
+        const cookies = auth.parseCookies(req.headers.cookie || '');
+        await auth.logout(cookies['admin_token']);
+      }
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': auth.generateClearCookieHeader(),
+        'Cache-Control': 'no-store'
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+    if (req.method === 'GET' && requestUrl.pathname === '/api/auth/status') {
+      const session = await auth.middleware(req);
+      return json(res, 200, { authenticated: !!session, username: session?.username || null });
+    }
+    if (req.method === 'POST' && requestUrl.pathname === '/api/auth/change-password') {
+      const session = await auth.middleware(req);
+      if (!session) return json(res, 401, { error: '未登录' });
+      let raw = '';
+      for await (const chunk of req) raw += chunk;
+      const { oldPassword, newPassword } = JSON.parse(raw);
+      await auth.changePassword(session.username, oldPassword, newPassword);
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Set-Cookie': auth.generateClearCookieHeader(),
+        'Cache-Control': 'no-store'
+      });
+      return res.end(JSON.stringify({ ok: true }));
+    }
+
     if (req.method === 'GET' && requestUrl.pathname === '/api/matches') {
       const date = requestUrl.searchParams.get('date');
       const data = await getMatches();
@@ -416,12 +465,16 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { predictions: await getPredictions(date) });
     }
     if (req.method === 'POST' && requestUrl.pathname === '/api/predictions') {
+      const session = await auth.middleware(req);
+      if (!session) return json(res, 401, { error: '请先登录' });
       let raw = '';
       for await (const chunk of req) raw += chunk;
       await savePrediction(JSON.parse(raw));
       return json(res, 200, { ok: true });
     }
     if (req.method === 'DELETE' && requestUrl.pathname === '/api/predictions') {
+      const session = await auth.middleware(req);
+      if (!session) return json(res, 401, { error: '请先登录' });
       const date = requestUrl.searchParams.get('date');
       if (!validDate(date)) return json(res, 400, { error: '日期格式应为 YYYY-MM-DD' });
       await deletePredictions(date);
@@ -439,6 +492,8 @@ initDb().then(() => server.listen(PORT, () => {
   console.log('红黑记录已启动：http://localhost:' + PORT);
   setTimeout(syncRecentResults, 5000);
   setInterval(syncRecentResults, 60 * 60 * 1000);
+  // 定期清理过期会话
+  setInterval(() => auth.cleanExpiredSessions(), 60 * 60 * 1000);
 })).catch(error => {
   console.error('数据库初始化失败', error);
   process.exit(1);

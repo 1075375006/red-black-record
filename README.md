@@ -2,6 +2,21 @@
 
 一个轻量的足球预测记录网页：同步竞彩比赛，记录胜平负/让球方向和备注，赛果回来后自动判定红黑。
 
+## ⚠️ 管理员认证
+
+项目已集成独立的管理员认证模块，所有写入操作（记录预测、修改记录、清空记录）必须登录后才能进行。
+
+首次启动时，系统会自动创建默认管理员账户：
+- 用户名：`admin`
+- 密码：`admin123456`
+
+**重要提示**：首次登录后请立即通过 `/change-password.html` 修改密码！
+
+访问路径：
+- 首页：`http://localhost:4399/`
+- 登录页面：`http://localhost:4399/login.html`
+- 修改密码：`http://localhost:4399/change-password.html`
+
 ## 一键部署
 
 ### Linux 服务器
@@ -80,6 +95,7 @@ docker compose down
 - `Dockerfile`：Node 22 Alpine 网页镜像。
 - `docker-compose.yml`：网页容器 + PostgreSQL 16 容器及持久化 volume。
 - `install-server.sh`：Linux 服务器一键部署脚本。
+- `install-mac.sh`：macOS 一键部署脚本。
 - `install.bat` / `install.ps1`：Windows 一键部署脚本。
 
 ## 联系我
