@@ -31,6 +31,25 @@ curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/in
 
 更新部署时重复执行上面的命令即可。Docker volume `redblack_red_black_pgdata` 会保留数据库数据。
 
+### 国外服务器使用 SOCKS5 代理
+
+体彩接口仅对国内网络开放时，可给网页容器配置 SOCKS5 代理。项目只会代理服务端访问体彩比赛和赛果 API，不会代理网页、数据库或其他流量。使用 `socks5://` 即可：
+
+```bash
+cd /opt/red-black-record
+printf '%s\n' 'UPSTREAM_SOCKS5_PROXY=socks5://用户名:密码@代理地址:代理端口' > .env
+docker compose up -d --build
+```
+
+也可以在一键部署时传入，安装脚本会把配置保存到安装目录的 `.env`，后续更新仍会保留：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh \
+  | sudo RED_BLACK_SOCKS5_PROXY='socks5://用户名:密码@代理地址:代理端口' bash
+```
+
+不设置 `UPSTREAM_SOCKS5_PROXY` 时，网页在本机直接访问体彩接口，不经过代理。代理用户名或密码包含 `@`、`#` 等特殊字符时，请先按 URL 规则编码。
+
 ### Windows
 
 启动 Docker Desktop 后，双击 `install.bat`，或在 PowerShell 执行：

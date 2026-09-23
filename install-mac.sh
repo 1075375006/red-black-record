@@ -5,6 +5,7 @@ REPO="${RED_BLACK_REPO:-1075375006/red-black-record}"
 BRANCH="${RED_BLACK_BRANCH:-main}"
 INSTALL_DIR="${RED_BLACK_DIR:-$HOME/red-black-record}"
 WEB_PORT="${RED_BLACK_PORT:-4399}"
+SOCKS5_PROXY="${RED_BLACK_SOCKS5_PROXY:-${UPSTREAM_SOCKS5_PROXY:-}}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then echo "此脚本仅适用于 macOS。Linux 请使用 install-server.sh。"; exit 1; fi
 command -v curl >/dev/null 2>&1 || { echo "未检测到 curl，请先安装 Xcode Command Line Tools。"; exit 1; }
@@ -55,6 +56,11 @@ done
 tar -xzf "$tmp_dir/project.tgz" -C "$tmp_dir"
 cp -a "$tmp_dir/$(basename "$REPO")-${BRANCH}"/. "$INSTALL_DIR"/
 cd "$INSTALL_DIR"
+
+if [[ -n "$SOCKS5_PROXY" ]]; then
+  umask 077
+  printf 'UPSTREAM_SOCKS5_PROXY=%s\n' "$SOCKS5_PROXY" > .env
+fi
 
 pull_image() {
   local image="$1"

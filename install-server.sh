@@ -5,6 +5,7 @@ REPO="${RED_BLACK_REPO:-1075375006/red-black-record}"
 BRANCH="${RED_BLACK_BRANCH:-main}"
 INSTALL_DIR="${RED_BLACK_DIR:-/opt/red-black-record}"
 WEB_PORT="${RED_BLACK_PORT:-4399}"
+SOCKS5_PROXY="${RED_BLACK_SOCKS5_PROXY:-${UPSTREAM_SOCKS5_PROXY:-}}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "请使用 root 运行，或执行：sudo bash -c \"curl -fsSL https://raw.githubusercontent.com/${REPO}/${BRANCH}/install-server.sh | bash\""
@@ -51,9 +52,14 @@ source_dir="$tmp_dir/$(basename "$REPO")-${BRANCH}"
 if [[ -f "$INSTALL_DIR/docker-compose.yml" ]]; then
   echo "保留现有 Docker 数据卷，更新应用文件。"
 fi
-find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name 'docker-compose.yml' -exec rm -rf {} +
+find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name 'docker-compose.yml' ! -name '.env' -exec rm -rf {} +
 cp -a "$source_dir"/. "$INSTALL_DIR"/
 cd "$INSTALL_DIR"
+
+if [[ -n "$SOCKS5_PROXY" ]]; then
+  umask 077
+  printf 'UPSTREAM_SOCKS5_PROXY=%s\n' "$SOCKS5_PROXY" > .env
+fi
 
 port_in_use() {
   if command -v ss >/dev/null 2>&1; then

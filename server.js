@@ -1,8 +1,10 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { Pool } = require('pg');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 const AuthModule = require('./auth');
 
 const PORT = Number(process.env.PORT || 8787);
@@ -17,6 +19,20 @@ const API = {
 const cache = new Map();
 const CACHE_TTL = 45 * 1000;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const upstreamProxyUrl = process.env.UPSTREAM_SOCKS5_PROXY || process.env.SOCKS5_PROXY || '';
+let upstreamProxyAgent = null;
+if (upstreamProxyUrl) {
+  try {
+    upstreamProxyAgent = new SocksProxyAgent(upstreamProxyUrl);
+  } catch (error) {
+    throw new Error('SOCKS5 代理地址无效：' + error.message);
+  }
+}
+
+function upstreamStatusError(statusCode) {
+  const mode = upstreamProxyAgent ? '当前已启用 SOCKS5 代理' : '当前未启用 SOCKS5 代理';
+  return new Error('上游接口返回 ' + statusCode + '（' + mode + '）');
+}
 const auth = new AuthModule(pool);
 
 async function initDb() {
@@ -289,17 +305,40 @@ function todayLocal() {
   return new Date(utc + 8 * 60 * 60000).toISOString().slice(0, 10);
 }
 
-async function upstream(url) {
-  const response = await fetch(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json, text/javascript, */*; q=0.01',
-      Origin: 'https://www.sporttery.cn',
-      Referer: 'https://www.sporttery.cn/',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36'
-    }
+function requestJsonThroughProxy(url, headers) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { agent: upstreamProxyAgent, headers }, response => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', chunk => { body += chunk; });
+      response.on('end', () => {
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(upstreamStatusError(response.statusCode));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error('上游接口返回了无效 JSON'));
+        }
+      });
+    });
+    request.setTimeout(30000, () => request.destroy(new Error('通过 SOCKS5 代理请求上游接口超时')));
+    request.on('error', reject);
   });
-  if (!response.ok) throw new Error('上游接口返回 ' + response.status);
+}
+
+async function upstream(url) {
+  const headers = {
+    Accept: 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Encoding': 'identity',
+    Origin: 'https://www.sporttery.cn',
+    Referer: 'https://www.sporttery.cn/',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36'
+  };
+  if (upstreamProxyAgent) return requestJsonThroughProxy(url, headers);
+  const response = await fetch(url, { method: 'GET', headers });
+  if (!response.ok) throw upstreamStatusError(response.status);
   return response.json();
 }
 
@@ -490,6 +529,7 @@ const server = http.createServer(async (req, res) => {
 
 initDb().then(() => server.listen(PORT, () => {
   console.log('红黑记录已启动：http://localhost:' + PORT);
+  if (upstreamProxyAgent) console.log('上游体彩接口：已启用 SOCKS5 代理');
   setTimeout(syncRecentResults, 5000);
   setInterval(syncRecentResults, 60 * 60 * 1000);
   // 定期清理过期会话

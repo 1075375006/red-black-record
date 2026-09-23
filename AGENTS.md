@@ -9,4 +9,5 @@
 - 日期归档：比赛、预测和赛果统一按竞彩销售日 `business_date` 归档，以“周三001”这类场次编号的星期为准；次日凌晨开球的比赛仍归入前一销售日。
 - 结算：服务端每小时同步最近 3 天赛果，并在赛果落库后按 `match_id`、玩法和预测时让球线结算；前端优先读取数据库中的 `settlement_status`。
 - 部署：macOS 默认安装到 `~/red-black-record`，Linux 默认安装到 `/opt/red-black-record`，默认外部端口均为 `4399`，占用时自动递增。
+- 网络：上游体彩接口默认直连；国外服务器通过 `UPSTREAM_SOCKS5_PROXY=socks5://...` 配置 SOCKS5，代理仅用于体彩比赛和赛果 API，Docker Compose 从 `.env` 读取并传给网页容器。
 - 验证：修改后运行 `node --check server.js`、`node --check public/app.js`、`docker compose config`。
