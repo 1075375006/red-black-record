@@ -2,57 +2,27 @@
 
 一个轻量的足球预测记录网页：同步竞彩比赛，记录胜平负/让球方向和备注，赛果回来后自动判定红黑。
 
-## ⚠️ 管理员认证
+## 管理员认证
 
-项目已集成独立的管理员认证模块，所有写入操作（记录预测、修改记录、清空记录）必须登录后才能进行。
+所有预测写入和代理配置操作都需要管理员登录。首次启动会创建默认账户 `admin` / `admin123456`，请立即访问 `/change-password.html` 修改密码。
 
-首次启动时，系统会自动创建默认管理员账户：
-- 用户名：`admin`
-- 密码：`admin123456`
-
-**重要提示**：首次登录后请立即通过 `/change-password.html` 修改密码！
-
-访问路径：
 - 首页：`http://localhost:4399/`
-- 登录页面：`http://localhost:4399/login.html`
-- 修改密码：`http://localhost:4399/change-password.html`
+- 登录：`http://localhost:4399/login.html`
+- 代理设置：`http://localhost:4399/proxy-admin/`
 
 ## 一键部署
 
 ### Linux 服务器
 
-Ubuntu/Debian 服务器直接执行：
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh | sudo bash
 ```
 
-脚本会自动下载最新版代码、准备 Docker（缺少时尝试安装）、启动网页和 PostgreSQL。默认安装到 `/opt/red-black-record`，默认端口为 `4399`；若端口被占用，会自动选择下一个可用端口并在输出中显示实际地址。云服务器安全组/防火墙需放行实际端口。
-
-更新部署时重复执行上面的命令即可。Docker volume `redblack_red_black_pgdata` 会保留数据库数据。
-
-### 国外服务器使用 SOCKS5 代理
-
-体彩接口仅对国内网络开放时，可给网页容器配置 SOCKS5 代理。项目只会代理服务端访问体彩比赛和赛果 API，不会代理网页、数据库或其他流量。使用 `socks5://` 即可：
-
-```bash
-cd /opt/red-black-record
-printf '%s\n' 'UPSTREAM_SOCKS5_PROXY=socks5://用户名:密码@代理地址:代理端口' > .env
-docker compose up -d --build
-```
-
-也可以在一键部署时传入，安装脚本会把配置保存到安装目录的 `.env`，后续更新仍会保留：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh \
-  | sudo RED_BLACK_SOCKS5_PROXY='socks5://用户名:密码@代理地址:代理端口' bash
-```
-
-不设置 `UPSTREAM_SOCKS5_PROXY` 时，网页在本机直接访问体彩接口，不经过代理。代理用户名或密码包含 `@`、`#` 等特殊字符时，请先按 URL 规则编码。
+脚本自动准备 Docker 并启动主站、代理网关和 PostgreSQL。默认安装目录 `/opt/red-black-record`，默认端口 `4399`，端口占用时自动递增。更新部署时重复执行即可。脚本会保留 `.env` 中已有设置，并为网关生成随机令牌和代理密码加密密钥。
 
 ### Windows
 
-启动 Docker Desktop 后，双击 `install.bat`，或在 PowerShell 执行：
+启动 Docker Desktop 后双击 `install.bat`，或运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -60,27 +30,11 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ### macOS
 
-安装并启动 Docker Desktop 后，在终端执行：
-
 ```bash
 curl -4fL --retry 5 https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
 ```
 
-脚本会自动下载最新版代码、启动 Docker Desktop、构建网页和数据库。默认安装到 `~/red-black-record`，默认端口为 `4399`；端口被占用时会自动选择下一个可用端口。
-
-如果上述地址仍无法访问，可改用 jsDelivr CDN 获取安装脚本：
-
-```bash
-curl -4fL --retry 5 https://cdn.jsdelivr.net/gh/1075375006/red-black-record@main/install-mac.sh | bash
-```
-
-如果所在网络访问 Docker Hub 或 GitHub 不稳定，脚本会自动强制使用 IPv4、重试并切换备用镜像。也可以手动指定镜像：
-
-```bash
-RED_BLACK_NODE_IMAGE=mirror.gcr.io/library/node:22-alpine \\
-RED_BLACK_POSTGRES_IMAGE=mirror.gcr.io/library/postgres:16-alpine \\
-curl -4fL --retry 5 https://raw.githubusercontent.com/1075375006/red-black-record/main/install-mac.sh | bash
-```
+默认安装目录 `~/red-black-record`，默认端口 `4399`，被占用时自动递增。
 
 ### 手动 Docker 启动
 
@@ -88,44 +42,51 @@ curl -4fL --retry 5 https://raw.githubusercontent.com/1075375006/red-black-recor
 docker compose up -d --build
 ```
 
-网页和容器内部统一使用 `4399` 端口。查看状态、停止服务：
+停止服务使用 `docker compose down`。**不要运行 `docker compose down -v`，该命令会删除数据库和网关配置数据卷。**
 
-```powershell
-docker compose ps
-docker compose down
+## 国外服务器访问体彩 API
+
+体彩比赛和赛果接口只允许国内网络访问。项目使用独立的 `proxy-gateway` 容器管理上游出口。代理只用于服务端访问 `webapi.sporttery.cn` 的比赛与赛果 API，不转发网页流量、数据库连接或其他请求；网关端口只在 Docker 内部开放。
+
+管理员登录后，从首页点击“代理设置”，可访问 `/proxy-admin/` 添加、修改、测试、启用或停用 SOCKS5/SOCKS5h 代理，也可调整优先顺序、查看运行状态和请求日志。关闭全局代理开关时走直连；开启时按优先级使用代理；配置保存后立即生效，无需重启容器。代理列表和开关保存在独立的 `proxy_gateway_data` 数据卷中。
+
+旧版本 `.env` 中的 `UPSTREAM_SOCKS5_PROXY` 会在新网关首次启动时自动导入。首次导入后，后台配置成为唯一来源，后续改 `.env` 不会覆盖后台设置。安装时也可以提供初始代理：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/1075375006/red-black-record/main/install-server.sh \\
+  | sudo RED_BLACK_SOCKS5_PROXY='socks5h://用户名:密码@代理地址:代理端口' bash
 ```
 
-`docker compose down -v` 会同时删除数据库数据，请谨慎使用。
+手动 Docker 部署若要保存带认证信息的代理，应在 `.env` 中设置随机 `PROXY_SECRET_KEY`（32 字节十六进制值），并为 `RELAY_TOKEN`、`PROXY_ADMIN_TOKEN` 配置独立随机值。安装脚本会自动生成这些密钥。代理密码采用 AES-256-GCM 加密保存；丢失 `PROXY_SECRET_KEY` 后需重新填写代理密码。
 
 ## 功能
 
-- 比赛 API 和赛果 API 由本地 Node 服务转发，并附带竞彩站点所需请求头。
-- PostgreSQL 保存比赛快照、官方完整赛果、全场比分、预测玩法、方向、让球线、备注、实际赛果方向、红黑状态和结算时间；浏览器 localStorage 作为离线兜底。
-- “全部”页面按 API 当前比赛在前、数据库历史比赛在后合并展示，同一场比赛不重复。
-- “待预测”仅显示当前 API 仍可操作且尚未选择方向的比赛。
-- 已下架、过期或已完赛比赛锁定所有操作，原有记录仍可查看。
-- 日期按竞彩销售日归档，以“周三001”这类场次编号为准；即使比赛在次日凌晨开球，仍显示在对应的前一销售日中。
-- 服务端启动后每小时自动同步最近 3 天赛果，页面每 5 分钟也会同步；赛果落库后由服务端自动结算并永久保存红/黑状态。
+- 主项目通过代理网关请求体彩比赛和赛果 API，并添加上游要求的请求头。
+- 网关有全局开关、代理列表、优先级故障切换、失败冷却、连通性测试和日志。
+- 网关只接受白名单中的 HTTPS 请求，默认仅允许 `webapi.sporttery.cn`。
+- PostgreSQL 保存比赛快照、官方赛果和持久化红黑结算状态；浏览器 localStorage 仅作离线兜底。
+- 全部页面合并显示 API 当前比赛与数据库历史比赛；待预测只显示未过期、未完赛且未选择方向的比赛。
+- 日期按竞彩销售日归档；次日凌晨开球仍归入前一销售日。
+- 服务端每小时同步最近 3 天赛果，并在赛果落库后自动结算。
 
 ## 技术结构
 
-- `server.js`：静态网页服务、上游 API 代理、PostgreSQL 初始化与 REST 接口。
-- `public/`：前端页面、样式和交互逻辑。
-- `Dockerfile`：Node 22 Alpine 网页镜像。
-- `docker-compose.yml`：网页容器 + PostgreSQL 16 容器及持久化 volume。
-- `install-server.sh`：Linux 服务器一键部署脚本。
-- `install-mac.sh`：macOS 一键部署脚本。
-- `install.bat` / `install.ps1`：Windows 一键部署脚本。
+- `server.js`：主站 HTTP 服务、业务 REST 接口、认证与静态页面。
+- `lib/upstream-client.js`：主站到代理网关的上游请求客户端。
+- `proxy-gateway/`：独立代理网关、管理 API、管理页面和配置加密存储。
+- `public/`：主站前端。
+- `docker-compose.yml`：主站、代理网关和 PostgreSQL 服务。
+- `install-server.sh` / `install-mac.sh` / `install.ps1`：部署脚本。
 
-## 联系我
+## 验证命令
 
-如有使用问题或功能建议，欢迎添加微信联系：
-
-<table align="center" border="1" cellpadding="14" cellspacing="0">
-  <tr>
-    <td align="center">
-      <img src="https://image.dooo.ng/c/2025/03/31/67e976e7dac1e.jpg" width="240" alt="微信二维码" />
-      <br />扫码添加微信
-    </td>
-  </tr>
-</table>
+```bash
+node --check server.js
+node --check lib/upstream-client.js
+node --check public/app.js
+node --check proxy-gateway/src/index.js
+node --check proxy-gateway/src/config-store.js
+node --check proxy-gateway/src/relay.js
+node --check proxy-gateway/public/admin.js
+docker compose config
+```

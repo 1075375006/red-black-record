@@ -56,10 +56,27 @@ find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name 'docker-compose.yml' ! -name
 cp -a "$source_dir"/. "$INSTALL_DIR"/
 cd "$INSTALL_DIR"
 
-if [[ -n "$SOCKS5_PROXY" ]]; then
-  umask 077
-  printf 'UPSTREAM_SOCKS5_PROXY=%s\n' "$SOCKS5_PROXY" > .env
-fi
+set_env() {
+  local key="$1" value="$2" file="$INSTALL_DIR/.env" tmp="$INSTALL_DIR/.env.tmp"
+  touch "$file"
+  chmod 600 "$file"
+  grep -v "^${key}=" "$file" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$file"
+  chmod 600 "$file"
+}
+ensure_secret() {
+  local key="$1" value
+  value="$(grep -m1 "^${key}=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2-)"
+  if [[ -z "$value" ]]; then
+    value="$(openssl rand -hex 32)"
+    set_env "$key" "$value"
+  fi
+}
+if [[ -n "$SOCKS5_PROXY" ]]; then set_env UPSTREAM_SOCKS5_PROXY "$SOCKS5_PROXY"; fi
+ensure_secret RELAY_TOKEN
+ensure_secret PROXY_ADMIN_TOKEN
+ensure_secret PROXY_SECRET_KEY
 
 port_in_use() {
   if command -v ss >/dev/null 2>&1; then

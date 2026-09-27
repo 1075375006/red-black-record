@@ -1,0 +1,9 @@
+{
+  "name": "red-black-proxy-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "description": "红黑记录上游 API 代理网关",
+  "type": "commonjs",
+  "scripts": { "start": "node src/index.js" },
+  "dependencies": { "socks-proxy-agent": "^8.0.5" }
+}

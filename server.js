@@ -1,11 +1,10 @@
 const http = require('http');
-const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { Pool } = require('pg');
-const { SocksProxyAgent } = require('socks-proxy-agent');
 const AuthModule = require('./auth');
+const upstreamClient = require('./lib/upstream-client');
 
 const PORT = Number(process.env.PORT || 8787);
 const ROOT = __dirname;
@@ -19,20 +18,6 @@ const API = {
 const cache = new Map();
 const CACHE_TTL = 45 * 1000;
 const pool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
-const upstreamProxyUrl = process.env.UPSTREAM_SOCKS5_PROXY || process.env.SOCKS5_PROXY || '';
-let upstreamProxyAgent = null;
-if (upstreamProxyUrl) {
-  try {
-    upstreamProxyAgent = new SocksProxyAgent(upstreamProxyUrl);
-  } catch (error) {
-    throw new Error('SOCKS5 代理地址无效：' + error.message);
-  }
-}
-
-function upstreamStatusError(statusCode) {
-  const mode = upstreamProxyAgent ? '当前已启用 SOCKS5 代理' : '当前未启用 SOCKS5 代理';
-  return new Error('上游接口返回 ' + statusCode + '（' + mode + '）');
-}
 const auth = new AuthModule(pool);
 
 async function initDb() {
@@ -305,41 +290,8 @@ function todayLocal() {
   return new Date(utc + 8 * 60 * 60000).toISOString().slice(0, 10);
 }
 
-function requestJsonThroughProxy(url, headers) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, { agent: upstreamProxyAgent, headers }, response => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { body += chunk; });
-      response.on('end', () => {
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          reject(upstreamStatusError(response.statusCode));
-          return;
-        }
-        try {
-          resolve(JSON.parse(body));
-        } catch {
-          reject(new Error('上游接口返回了无效 JSON'));
-        }
-      });
-    });
-    request.setTimeout(30000, () => request.destroy(new Error('通过 SOCKS5 代理请求上游接口超时')));
-    request.on('error', reject);
-  });
-}
-
 async function upstream(url) {
-  const headers = {
-    Accept: 'application/json, text/javascript, */*; q=0.01',
-    'Accept-Encoding': 'identity',
-    Origin: 'https://www.sporttery.cn',
-    Referer: 'https://www.sporttery.cn/',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/152 Safari/537.36'
-  };
-  if (upstreamProxyAgent) return requestJsonThroughProxy(url, headers);
-  const response = await fetch(url, { method: 'GET', headers });
-  if (!response.ok) throw upstreamStatusError(response.status);
-  return response.json();
+  return upstreamClient.getJson(url);
 }
 
 async function cached(key, loader) {
@@ -390,8 +342,42 @@ async function syncRecentResults() {
   }
 }
 
+async function proxyAdminRequest(req, res, requestUrl) {
+  const gateway = (process.env.UPSTREAM_GATEWAY_URL || '').replace(/\/$/, '');
+  if (!gateway) return json(res, 503, { error: '未配置代理网关' });
+  const isApi = requestUrl.pathname.includes('/admin/api/');
+  const session = await auth.middleware(req);
+  if (!session) {
+    if (!isApi && req.method === 'GET') {
+      res.writeHead(302, { Location: '/login.html?next=' + encodeURIComponent('/proxy-admin/') });
+      return res.end();
+    }
+    return json(res, 401, { error: '未登录' });
+  }
+  const pathname = requestUrl.pathname.replace(/^\/proxy-admin/, '') || '/';
+  const target = gateway + pathname + requestUrl.search;
+  const headers = {
+    'X-Admin-Token': process.env.PROXY_ADMIN_TOKEN || '',
+    'X-Admin-User': session.username,
+    Accept: req.headers.accept || '*/*'
+  };
+  let body;
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    body = Buffer.concat(chunks);
+    headers['Content-Type'] = req.headers['content-type'] || 'application/json';
+  }
+  const response = await fetch(target, { method: req.method, headers, body, signal: AbortSignal.timeout(45000), redirect: 'manual' });
+  res.writeHead(response.status, {
+    'Content-Type': response.headers.get('content-type') || 'application/octet-stream',
+    'Cache-Control': response.headers.get('cache-control') || 'no-store'
+  });
+  res.end(Buffer.from(await response.arrayBuffer()));
+}
+
 function safeFile(filePath) {
-  const absolute = path.resolve(PUBLIC_DIR, filePath.replace(/^[/\\]+/, ''));
+  const absolute = path.resolve(PUBLIC_DIR, filePath.replace(/^[/\\\\]+/, ''));
   return absolute.startsWith(path.resolve(PUBLIC_DIR)) ? absolute : null;
 }
 
@@ -459,6 +445,14 @@ const server = http.createServer(async (req, res) => {
         'Cache-Control': 'no-store'
       });
       return res.end(JSON.stringify({ ok: true }));
+    }
+
+    if (req.method === 'GET' && requestUrl.pathname === '/api/upstream/status') {
+      try { return json(res, 200, await upstreamClient.getStatus()); }
+      catch (error) { return json(res, 200, { ok: false, mode: 'unavailable', error: error.message }); }
+    }
+    if (requestUrl.pathname === '/proxy-admin' || requestUrl.pathname.startsWith('/proxy-admin/')) {
+      return await proxyAdminRequest(req, res, requestUrl);
     }
 
     if (req.method === 'GET' && requestUrl.pathname === '/api/matches') {
@@ -529,7 +523,7 @@ const server = http.createServer(async (req, res) => {
 
 initDb().then(() => server.listen(PORT, () => {
   console.log('红黑记录已启动：http://localhost:' + PORT);
-  if (upstreamProxyAgent) console.log('上游体彩接口：已启用 SOCKS5 代理');
+  console.log('上游出口：' + (upstreamClient.gatewayConfigured ? '代理网关' : '直连'));
   setTimeout(syncRecentResults, 5000);
   setInterval(syncRecentResults, 60 * 60 * 1000);
   // 定期清理过期会话

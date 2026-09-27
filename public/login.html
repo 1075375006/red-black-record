@@ -177,8 +177,9 @@
             throw new Error(data.error || '登录失败');
           }
 
-          // 登录成功，跳转到首页
-          window.location.href = '/';
+          // 登录后仅允许跳转到站内相对路径，避免开放重定向。
+          const next = new URLSearchParams(window.location.search).get('next') || '/';
+          window.location.href = next.startsWith('/') && !next.startsWith('//') ? next : '/';
         } catch (error) {
           showError(error.message);
           loginButton.disabled = false;

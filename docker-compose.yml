@@ -17,6 +17,31 @@ services:
       timeout: 5s
       retries: 20
 
+  proxy-gateway:
+    build:
+      context: ./proxy-gateway
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+    container_name: red-black-record-proxy-gateway
+    restart: unless-stopped
+    expose:
+      - "4398"
+    environment:
+      PORT: 4398
+      DATA_DIR: /data
+      RELAY_TOKEN: ${RELAY_TOKEN:-local-relay-token-change-me}
+      PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN:-local-admin-token-change-me}
+      PROXY_SECRET_KEY: ${PROXY_SECRET_KEY:-}
+      PROXY_BOOTSTRAP_URL: ${UPSTREAM_SOCKS5_PROXY:-}
+      PROXY_ALLOWED_HOSTS: webapi.sporttery.cn
+    volumes:
+      - proxy_gateway_data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4398/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   web:
     build:
       context: .
@@ -27,12 +52,18 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      proxy-gateway:
+        condition: service_started
     environment:
       PORT: 4399
       DATABASE_URL: postgres://redblack:redblack_local_password@db:5432/redblack
-      UPSTREAM_SOCKS5_PROXY: ${UPSTREAM_SOCKS5_PROXY:-}
+      UPSTREAM_GATEWAY_URL: http://proxy-gateway:4398
+      UPSTREAM_GATEWAY_FALLBACK: ${UPSTREAM_GATEWAY_FALLBACK:-fail}
+      RELAY_TOKEN: ${RELAY_TOKEN:-local-relay-token-change-me}
+      PROXY_ADMIN_TOKEN: ${PROXY_ADMIN_TOKEN:-local-admin-token-change-me}
     ports:
       - "${WEB_PORT:-4399}:4399"
 
 volumes:
   red_black_pgdata:
+  proxy_gateway_data:

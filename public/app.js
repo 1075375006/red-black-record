@@ -85,7 +85,7 @@
   function updateAuthUI() {
     const clockLabel = $('#clockLabel');
     if (state.authenticated) {
-      clockLabel.innerHTML = `<span style="color: rgba(110, 231, 183, 0.9);">已登录：${state.username}</span> · <a href="/change-password.html" style="color: #38bdf8; text-decoration: none;">修改密码</a> · <a href="#" id="logoutLink" style="color: #fca5a5; text-decoration: none;">退出</a>`;
+      clockLabel.innerHTML = `<span style="color: rgba(110, 231, 183, 0.9);">已登录：${state.username}</span> · <a href="/proxy-admin/" style="color: #38bdf8; text-decoration: none;">代理设置</a> · <a href="/change-password.html" style="color: #38bdf8; text-decoration: none;">修改密码</a> · <a href="#" id="logoutLink" style="color: #fca5a5; text-decoration: none;">退出</a>`;
       const logoutLink = $('#logoutLink');
       if (logoutLink) {
         logoutLink.addEventListener('click', async (e) => {
